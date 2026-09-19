@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import MapView from './components/MapView.jsx'
 import StepRail from './components/StepRail.jsx'
 import RightPanel from './components/RightPanel.jsx'
+import Legend from './components/Legend.jsx'
 import { STEPS, STATUS } from './lib/steps.js'
 import { loadIndex, loadScene, loadSaved, saveSaved, download, exportParcels } from './lib/data.js'
-import { overlapsFor, resolveOverlaps, areaM2, boundsOf } from './lib/geo.js'
+import { overlapsFor, resolveOverlaps, areaM2 } from './lib/geo.js'
 
 const STEP_MS = 2600
 
@@ -20,6 +21,13 @@ export default function App() {
   const [fixMode, setFixMode] = useState('after')
   const [playing, setPlaying] = useState(false)
   const [scanNonce, setScanNonce] = useState(0)
+
+  // Layout & Styling Controls
+  const [leftOpen, setLeftOpen] = useState(true)
+  const [rightOpen, setRightOpen] = useState(true)
+  const [fillEnabled, setFillEnabled] = useState(false)
+  const [fillOpacity, setFillOpacity] = useState(0.35)
+  const [fitNonce, setFitNonce] = useState(0)
 
   const [parcels, setParcels] = useState(null)
   const [rebuildKey, setRebuildKey] = useState(0)
@@ -108,7 +116,10 @@ export default function App() {
   const select = (id) => {
     if (editingId && id !== editingId) finishEdit()
     setSelectedId(id)
-    if (id) setTab('parcel')
+    if (id) {
+      setTab('parcel')
+      if (!rightOpen) setRightOpen(true)
+    }
   }
 
   const onGeometryEdit = (id, geometry) => {
@@ -151,19 +162,42 @@ export default function App() {
   if (!scene || !parcels) return <div className="boot"><h1>Dhara.ai</h1><p>Loading scene…</p></div>
 
   const m = scene.manifest
+  const appClasses = ['app', !leftOpen ? 'no-left' : '', !rightOpen ? 'no-right' : ''].filter(Boolean).join(' ')
+
   return (
-    <div className="app">
+    <div className={appClasses}>
       <header className="top">
+        <button
+          className="panel-toggle-btn"
+          onClick={() => setLeftOpen((o) => !o)}
+          title={leftOpen ? 'Hide pipeline rail' : 'Show pipeline rail'}
+          aria-label={leftOpen ? 'Hide pipeline rail' : 'Show pipeline rail'}
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <path d="M9 3v18" />
+          </svg>
+        </button>
+
         <div className="brand">
-          <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#12233F" /><path d="M7 9h11l7 5v9H7z" fill="none" stroke="#F2F5F9" strokeWidth="2" strokeLinejoin="round" /><path d="M7 16h18M16 9v14" stroke="#E2566B" strokeWidth="2" /></svg>
-          <div><h1>Dhara.ai</h1><p>Drone imagery to candidate parcel maps</p></div>
+          <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
+            <rect width="32" height="32" rx="7" fill="#12233F" />
+            <path d="M7 9h11l7 5v9H7z" fill="none" stroke="#F2F5F9" strokeWidth="2" strokeLinejoin="round" />
+            <path d="M7 16h18M16 9v14" stroke="#E2566B" strokeWidth="2" />
+          </svg>
+          <div>
+            <h1>Dhara.ai</h1>
+            <p>Drone imagery to candidate parcel maps</p>
+          </div>
         </div>
+
         <label className="scene-pick">
           <span className="sr">Scene</span>
           <select value={sceneId} onChange={(e) => { stop(); setSceneId(e.target.value) }}>
             {index.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
           </select>
         </label>
+
         <div className="top-right">
           {m.georef_source === 'assumed_demo' && <span className="chip" title="Demo image without survey metadata">Assumed georeference</span>}
           <span className="chip draft">All parcels: draft, pending officer review</span>
@@ -179,38 +213,99 @@ export default function App() {
               </div>
             )}
           </div>
+          <button
+            className="panel-toggle-btn"
+            onClick={() => setRightOpen((o) => !o)}
+            title={rightOpen ? 'Hide inspector panel' : 'Show inspector panel'}
+            aria-label={rightOpen ? 'Hide inspector panel' : 'Show inspector panel'}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <path d="M15 3v18" />
+            </svg>
+          </button>
         </div>
       </header>
 
-      <StepRail
-        stepIdx={stepIdx} onStep={manualStep} playing={playing} onPlay={play} onStop={stop}
-        vis={vis} onToggleLayer={(k) => setVis((v) => ({ ...v, [k]: !v[k] }))}
-        regMode={regMode} onRegMode={setRegMode} fixMode={fixMode} onFixMode={setFixMode} manifest={m}
-      />
+      {leftOpen && (
+        <StepRail
+          stepIdx={stepIdx} onStep={manualStep} playing={playing} onPlay={play} onStop={stop}
+          vis={vis} onToggleLayer={(k) => setVis((v) => ({ ...v, [k]: !v[k] }))}
+          regMode={regMode} onRegMode={setRegMode} fixMode={fixMode} onFixMode={setFixMode} manifest={m}
+        />
+      )}
 
       <main className="stage">
         <MapView
           scene={scene} vis={vis} regMode={regMode} fixMode={fixMode} styleMode={styleMode}
           parcels={parcels} rebuildKey={rebuildKey} statuses={statuses} selectedId={selectedId} onSelect={select}
           editingId={editingId} onGeometryEdit={onGeometryEdit} overlaps={overlaps} focus={focus}
+          fillEnabled={fillEnabled} fillOpacity={fillOpacity} fitNonce={fitNonce}
         />
+
         {scanNonce > 0 && <div key={scanNonce} className="scan" aria-hidden="true" />}
-        <div className="stage-tag"><b>{STEPS[stepIdx].title}</b><span>{stepIdx + 1} of {STEPS.length}</span></div>
-        {styleMode === 'status' && (
-          <ul className="legend" aria-label="Status colours">
-            {Object.entries(STATUS).map(([k, v]) => <li key={k}><i style={{ background: v.color }} />{v.label}</li>)}
-          </ul>
-        )}
+
+        {/* Stage Floating Controls */}
+        <div className="stage-tag">
+          <b>{STEPS[stepIdx].title}</b>
+          <span>{stepIdx + 1} of {STEPS.length}</span>
+        </div>
+
+        <div className="map-toolbar" role="toolbar" aria-label="Map display controls">
+          <button
+            className="tool-btn"
+            onClick={() => setFitNonce((n) => n + 1)}
+            title="Fit view to scene extent"
+            aria-label="Fit view to scene extent"
+          >
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 9V3h6M15 3h6v6M21 15v6h-6M9 21H3v-6" />
+            </svg>
+            <span>Fit view</span>
+          </button>
+
+          {styleMode !== 'status' && (
+            <div className="fill-controls">
+              <label className="fill-check">
+                <input
+                  type="checkbox"
+                  checked={fillEnabled}
+                  onChange={(e) => setFillEnabled(e.target.checked)}
+                />
+                <span>Fill</span>
+              </label>
+
+              {fillEnabled && (
+                <label className="opacity-slider" title="Fill opacity">
+                  <input
+                    type="range"
+                    min="0.10"
+                    max="0.85"
+                    step="0.05"
+                    value={fillOpacity}
+                    onChange={(e) => setFillOpacity(parseFloat(e.target.value))}
+                    aria-label="Parcel fill opacity"
+                  />
+                  <span>{Math.round(fillOpacity * 100)}%</span>
+                </label>
+              )}
+            </div>
+          )}
+        </div>
+
+        <Legend vis={vis} styleMode={styleMode} fillEnabled={fillEnabled} />
       </main>
 
-      <RightPanel
-        tab={tab} onTab={setTab} manifest={m}
-        parcel={parcel} statuses={statuses} onStatus={setStatus} audit={audit}
-        issues={issues} fixMode={fixMode} onFocus={(b) => setFocus({ bounds: b, nonce: Date.now() })}
-        editing={!!editingId} onEditStart={startEdit} onEditDone={finishEdit}
-        overlaps={overlaps} onResolve={resolve}
-        reviewed={reviewed} approved={approved} total={parcels.features.length}
-      />
+      {rightOpen && (
+        <RightPanel
+          tab={tab} onTab={setTab} manifest={m}
+          parcel={parcel} statuses={statuses} onStatus={setStatus} audit={audit}
+          issues={issues} fixMode={fixMode} onFocus={(b) => setFocus({ bounds: b, nonce: Date.now() })}
+          editing={!!editingId} onEditStart={startEdit} onEditDone={finishEdit}
+          overlaps={overlaps} onResolve={resolve}
+          reviewed={reviewed} approved={approved} total={parcels.features.length}
+        />
+      )}
     </div>
   )
 }

@@ -38,7 +38,7 @@ Acceptance: village parcel 0002 is High or Medium and its reason mentions vegeta
 
 ---
 
-## [ ] Task 2 - Map readability and layout
+## [x] Task 2 - Map readability and layout
 Steps
 1. Fit the scene to the available stage and refit on window resize. Make the left rail and right panel collapsible so the image can fill the screen.
 2. Plot numbers: show only when zoomed in enough **and** avoid overlaps (simple collision hiding by priority/area); always show the selected parcel's number.
