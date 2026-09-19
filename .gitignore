@@ -11,3 +11,5 @@ data/processed/*/orthomosaic.tif
 data/processed/*/web/
 data/processed/*/tiles/
 .DS_Store
+models/
+labels/

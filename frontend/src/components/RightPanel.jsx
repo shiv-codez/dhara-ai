@@ -456,12 +456,23 @@ function ReportTab({ manifest: m, reviewed, approved, flagged = 0, rejected = 0,
         <h3>What the pipeline produced</h3>
         <dl className="facts">
           <div><dt>Model</dt><dd>{m.model}</dd></div>
+          <div>
+            <dt>Classifier</dt>
+            <dd>
+              {m.classifier
+                ? `Trained on ${m.classifier.n_labels} officer labels (scenes ${m.classifier.scenes ? m.classifier.scenes.join(', ') : 'unknown'})`
+                : 'Rule-based'}
+            </dd>
+          </div>
           <div><dt>Segments proposed</dt><dd>{m.counts.sam_instances}</dd></div>
           <div><dt>Building footprints</dt><dd>{m.counts.buildings}</dd></div>
           <div><dt>Candidate parcels</dt><dd>{m.counts.parcels}</dd></div>
           <div><dt>Road corridors</dt><dd>{m.counts.road_corridors}</dd></div>
           <div><dt>Ground covered by</dt><dd>{m.coverage.building_pct}% roofs, {m.coverage.road_pct}% lanes, {m.coverage.vegetation_pct}% trees</dd></div>
         </dl>
+        {m.classifier && (
+          <p className="fine">Labels come from parcels the officer chose to review, so results on unreviewed areas are not measured.</p>
+        )}
       </section>
       <section>
         <h3>Measured run time</h3>

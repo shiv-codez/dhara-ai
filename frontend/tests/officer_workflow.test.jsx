@@ -1,6 +1,6 @@
 import { test, expect, describe } from 'vitest'
 import { sortQueueFeatures, PRIO_RANK } from '../src/components/RightPanel.jsx'
-import { exportParcels } from '../src/lib/data.js'
+import { exportParcels, exportLabels } from '../src/lib/data.js'
 
 describe('Officer Workflow Unit Tests', () => {
   test('Review queue sort order: High -> Medium -> Low, then area descending', () => {
@@ -204,5 +204,110 @@ describe('Officer Workflow Unit Tests', () => {
     expect(shouldHandleShortcut({ activeElementTag: 'DIV', isContentEditable: false, modalOpen: false, menuOpen: false, isEditing: true, key: 'A' })).toBe(false)
     expect(shouldHandleShortcut({ activeElementTag: 'DIV', isContentEditable: false, modalOpen: false, menuOpen: false, isEditing: true, key: 'F' })).toBe(false)
     expect(shouldHandleShortcut({ activeElementTag: 'DIV', isContentEditable: false, modalOpen: false, menuOpen: false, isEditing: true, key: 'Escape' })).toBe(true)
+  })
+
+  test('exportLabels JSON includes features, maps labels, and preserves provenance', () => {
+    const mockParcels = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          properties: {
+            parcel_id: 'P-01',
+            building_id: 'B-01',
+            veg_frac: 0.05,
+            sat: 0.12,
+            val: 0.70,
+            hue: 22.0,
+            rect: 0.85,
+            solidity: 0.90,
+            area_m2: 120.0,
+            ground_likeness: 0.15,
+          },
+        },
+        {
+          type: 'Feature',
+          properties: {
+            parcel_id: 'P-02',
+            building_id: 'B-02',
+            veg_frac: 0.60,
+            sat: 0.35,
+            val: 0.30,
+            hue: 35.0,
+            rect: 0.40,
+            solidity: 0.60,
+            area_m2: 45.0,
+            ground_likeness: 0.75,
+          },
+        },
+        {
+          type: 'Feature',
+          properties: {
+            parcel_id: 'P-03',
+            building_id: 'B-03',
+            veg_frac: 0.10,
+            sat: 0.20,
+            val: 0.50,
+            hue: 15.0,
+            rect: 0.70,
+            solidity: 0.80,
+            area_m2: 95.0,
+            ground_likeness: 0.25,
+          },
+        },
+        {
+          type: 'Feature',
+          properties: {
+            parcel_id: 'P-04',
+            building_id: 'B-04',
+            veg_frac: 0.0,
+            sat: 0.0,
+            val: 0.0,
+            hue: 0.0,
+            rect: 0.0,
+            solidity: 0.0,
+            area_m2: 0.0,
+            ground_likeness: 0.0,
+          },
+        },
+      ],
+    }
+
+    const statuses = {
+      'P-01': { status: 'approved', decided_by: 'individual' },
+      'P-02': { status: 'rejected', decided_by: 'individual' },
+      'P-03': { status: 'field_check', decided_by: 'individual' },
+      // P-04 left in draft
+    }
+
+    const labelsJson = exportLabels('village_tiled', mockParcels, statuses)
+    const records = JSON.parse(labelsJson)
+
+    // Only non-draft items exported (P-01, P-02, P-03)
+    expect(records).toHaveLength(3)
+
+    const r1 = records.find((r) => r.parcel_id === 'P-01')
+    expect(r1.scene).toBe('village_tiled')
+    expect(r1.building_id).toBe('B-01')
+    expect(r1.label).toBe('building')
+    expect(r1.decided_by).toBe('individual')
+    expect(r1.features).toEqual({
+      veg_frac: 0.05,
+      sat: 0.12,
+      val: 0.70,
+      hue: 22.0,
+      rect: 0.85,
+      solidity: 0.90,
+      area_m2: 120.0,
+      ground_likeness: 0.15,
+    })
+    expect(r1.exported_at).toBeDefined()
+
+    const r2 = records.find((r) => r.parcel_id === 'P-02')
+    expect(r2.label).toBe('not_building')
+    expect(r2.decided_by).toBe('individual')
+
+    const r3 = records.find((r) => r.parcel_id === 'P-03')
+    expect(r3.label).toBe('needs_field_check')
   })
 })

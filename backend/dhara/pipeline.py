@@ -54,7 +54,7 @@ def _count(issues: list[Issue]) -> dict:
 
 
 def run_scene(scene: Scene, params: Params | None = None, segmenter=None, out_dir: Path | None = None,
-              web_dir: Path | None = None, log=print) -> dict:
+              web_dir: Path | None = None, classifier=None, classifier_threshold: float = 0.5, log=print) -> dict:
     p = params or Params()
     t0 = time.time()
     out_dir = out_dir or DATA_OUT / scene.id
@@ -89,6 +89,37 @@ def run_scene(scene: Scene, params: Params | None = None, segmenter=None, out_di
     cls = [classify_instance(f, p) for f in feats]
     b_insts = [i for i, c in zip(insts, cls) if c == "building"]
     feat_map = {id(i): f for i, f in zip(insts, feats)}   # keep features indexed by instance id
+
+    # Second-stage veto: classifier filters candidate buildings accepted by rules
+    classifier_meta = None
+    if classifier is not None:
+        if isinstance(classifier, (str, Path)):
+            from .train_classifier import TrainedClassifier
+            classifier = TrainedClassifier.load(classifier)
+        b_feat_dicts = [
+            {
+                "veg_frac": feat_map[id(inst)].veg_frac,
+                "sat": feat_map[id(inst)].sat,
+                "val": feat_map[id(inst)].val,
+                "hue": feat_map[id(inst)].hue,
+                "rect": feat_map[id(inst)].rect,
+                "solidity": feat_map[id(inst)].solidity,
+                "area_m2": feat_map[id(inst)].area_m2,
+                "ground_likeness": ground_likeness(feat_map[id(inst)]),
+            }
+            for inst in b_insts
+        ]
+        if b_feat_dicts:
+            probs = classifier.predict_proba_building(b_feat_dicts)
+            vetoed = [inst for inst, p_bld in zip(b_insts, probs) if p_bld < classifier_threshold]
+            b_insts = [inst for inst, p_bld in zip(b_insts, probs) if p_bld >= classifier_threshold]
+            log(f"[{scene.id}] classifier vetoed {len(vetoed)} of {len(b_feat_dicts)} candidate buildings (threshold={classifier_threshold})")
+        classifier_meta = {
+            "source": "trained_officer_labels",
+            "threshold": classifier_threshold,
+            **classifier.metadata,
+        }
+
     bld_lab, owner = paint_instances(b_insts, (h, w), order_key=lambda i: -i.area_px)
     bld_mask = bld_lab > 0
     road, open_ground, skel = extract_free_space(bld_mask, veg, gsd, p)
@@ -256,6 +287,7 @@ def run_scene(scene: Scene, params: Params | None = None, segmenter=None, out_di
         "georef_source": tags.get("GEOREF_SOURCE", "embedded"),
         "area_ha": round(w * h * gsd * gsd / 10000, 3),
         "model": model_name,
+        "classifier": classifier_meta,
         "counts": {"sam_instances": len(insts), "buildings": len(buildings), "parcels": len(parcels_fixed),
                    "road_corridors": len(roads), "vegetation_patches": len(vegetation)},
         "regularisation": {

@@ -74,3 +74,42 @@ export function exportParcels(parcels, statuses, only) {
     .filter((f) => !only || (only === 'approved' ? f.properties.status === 'approved' : f.properties.status === only))
   return JSON.stringify({ type: 'FeatureCollection', features })
 }
+
+/** Export officer decisions as training label records (JSON). */
+export function exportLabels(sceneId, parcels, statuses) {
+  const exportedAt = new Date().toISOString()
+  const records = parcels.features
+    .map((f) => {
+      const p = f.properties
+      const s = statuses[p.parcel_id]
+      if (!s || !s.status || s.status === 'draft') return null
+
+      let label = null
+      if (s.status === 'approved') label = 'building'
+      else if (s.status === 'rejected') label = 'not_building'
+      else if (s.status === 'field_check') label = 'needs_field_check'
+      else label = s.status
+
+      return {
+        scene: sceneId,
+        parcel_id: p.parcel_id,
+        building_id: p.building_id || '',
+        label,
+        decided_by: s.decided_by || 'individual',
+        features: {
+          veg_frac: p.veg_frac ?? 0,
+          sat: p.sat ?? 0,
+          val: p.val ?? 0,
+          hue: p.hue ?? 0,
+          rect: p.rect ?? 0,
+          solidity: p.solidity ?? 0,
+          area_m2: p.area_m2 ?? 0,
+          ground_likeness: p.ground_likeness ?? 0,
+        },
+        exported_at: exportedAt,
+      }
+    })
+    .filter(Boolean)
+  return JSON.stringify(records, null, 2)
+}
+

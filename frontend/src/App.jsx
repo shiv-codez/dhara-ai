@@ -4,7 +4,7 @@ import StepRail from './components/StepRail.jsx'
 import RightPanel, { sortQueueFeatures } from './components/RightPanel.jsx'
 import Legend from './components/Legend.jsx'
 import { STEPS, STATUS } from './lib/steps.js'
-import { loadIndex, loadScene, loadSaved, saveSaved, download, exportParcels } from './lib/data.js'
+import { loadIndex, loadScene, loadSaved, saveSaved, download, exportParcels, exportLabels } from './lib/data.js'
 import { overlapsFor, resolveOverlaps, areaM2, boundsOf } from './lib/geo.js'
 
 const STEP_MS = 2600
@@ -570,6 +570,16 @@ export default function App() {
                   }}
                 >
                   Review audit log (JSON)
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    download(`${scene.id}_labels.json`, exportLabels(scene.id, parcels, statuses), 'application/json')
+                    setMenuOpen(false)
+                  }}
+                >
+                  Review labels (JSON)
                 </button>
                 <button
                   type="button"

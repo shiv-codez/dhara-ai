@@ -62,7 +62,7 @@ Acceptance: a full review of the village scene can be done with keyboard only; c
 
 ---
 
-## [ ] Task 4 - Learn from officer decisions (human-in-the-loop classifier)
+## [x] Task 4 - Learn from officer decisions (human-in-the-loop classifier)
 Steps
 1. Export button "Review labels (JSON)": for every decided parcel, the building's class evidence (from Task 1) plus label (`building` / `not_building` derived from Approve vs Reject; Needs-field-check is excluded).
 2. `backend/dhara/train_classifier.py`: train a small model (logistic regression or gradient boosting from scikit-learn) on those labels; save with `joblib`; report cross-validated precision/recall **on the labels supplied** and say how many labels were used.
