@@ -25,7 +25,7 @@ Acceptance
 
 ---
 
-## [ ] Task 1 - Make review priority reflect class evidence, not SAM stability
+## [x] Task 1 - Make review priority reflect class evidence, not SAM stability
 **Why:** parcel 0002 (63% vegetation) has segment quality 0.97 and was rated Low.
 
 Steps

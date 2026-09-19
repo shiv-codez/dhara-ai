@@ -8,7 +8,7 @@
    75.78729277438698
   ],
   [
-   26.9124,
+   26.912400000000005,
    75.78831509162647
   ]
  ],
@@ -65,12 +65,12 @@
  },
  "timings_s": {
   "segmentation_s": 0.0,
-  "classification_s": 1.0,
-  "vectorisation_s": 3.4,
-  "parcel_inference_s": 0.4,
-  "topology_s": 0.2
+  "classification_s": 1.2,
+  "vectorisation_s": 3.9,
+  "parcel_inference_s": 0.5,
+  "topology_s": 0.3
  },
- "total_s": 5.9,
+ "total_s": 7.3,
  "params": {
   "points_per_side": 40,
   "points_per_batch": 32,

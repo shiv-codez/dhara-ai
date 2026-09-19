@@ -85,6 +85,27 @@ def instance_features(inst: Instance, rgb: np.ndarray, veg: np.ndarray, gsd: flo
     )
 
 
+def ground_likeness(f: Feat) -> float:
+    """Score in [0,1] for how much an instance looks like ground rather than a roof.
+
+    Dark-brown + blobby + low rectangularity + low contrast. Used to triage review priority
+    for instances classified as buildings that may actually be shadowed earth.
+    """
+    score = 0.0
+    # dark brown colour (low val, low-to-mid sat, low hue)
+    if f.val < 0.36 and f.sat > 0.18 and f.hue < 50:
+        score += 0.35
+    # blobby shape (low solidity, low rectangularity)
+    if f.solidity < 0.82:
+        score += 0.25 * (1.0 - min(f.solidity / 0.82, 1.0))
+    if f.rect < 0.65:
+        score += 0.25 * (1.0 - min(f.rect / 0.65, 1.0))
+    # low contrast / uniform patch
+    if f.sat < 0.15 and f.val < 0.42:
+        score += 0.15
+    return min(score, 1.0)
+
+
 def classify_instance(f: Feat, p: Params) -> str:
     if f.veg_frac >= 0.45:
         return "vegetation"

@@ -1,12 +1,12 @@
 [
  {
-  "id": "town_dense",
-  "title": "Dense old-town settlement",
-  "description": "Compact multi-storey settlement, narrow lanes, touching buildings."
- },
- {
   "id": "village_tiled",
   "title": "Village with tiled roofs",
   "description": "Low-density village: tiled roofs, tree cover, open ground, paddy edge."
+ },
+ {
+  "id": "town_dense",
+  "title": "Dense old-town settlement",
+  "description": "Compact multi-storey settlement, narrow lanes, touching buildings."
  }
 ]

@@ -60,11 +60,11 @@
  "timings_s": {
   "segmentation_s": 0.0,
   "classification_s": 0.1,
-  "vectorisation_s": 0.3,
+  "vectorisation_s": 0.4,
   "parcel_inference_s": 0.1,
   "topology_s": 0.1
  },
- "total_s": 0.8,
+ "total_s": 1.4,
  "params": {
   "points_per_side": 40,
   "points_per_batch": 32,

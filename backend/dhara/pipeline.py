@@ -17,8 +17,8 @@ from shapely.geometry import box, shape
 from shapely.ops import unary_union
 
 from . import export
-from .classify import (classify_instance, extract_free_space, instance_features, paint_instances,
-                       vegetation_map)
+from .classify import (classify_instance, extract_free_space, ground_likeness, instance_features,
+                       paint_instances, vegetation_map)
 from .config import DATA_OUT, DATA_RAW, Params, Scene
 from .georef import create_demo_geotiff, read_orthomosaic, wgs84_bounds
 from .parcels import build_parcels, landuse_label
@@ -88,6 +88,7 @@ def run_scene(scene: Scene, params: Params | None = None, segmenter=None, out_di
     feats = [instance_features(i, rgb, veg, gsd) for i in insts]
     cls = [classify_instance(f, p) for f in feats]
     b_insts = [i for i, c in zip(insts, cls) if c == "building"]
+    feat_map = {id(i): f for i, f in zip(insts, feats)}   # keep features indexed by instance id
     bld_lab, owner = paint_instances(b_insts, (h, w), order_key=lambda i: -i.area_px)
     bld_mask = bld_lab > 0
     road, open_ground, skel = extract_free_space(bld_mask, veg, gsd, p)
@@ -116,10 +117,17 @@ def run_scene(scene: Scene, params: Params | None = None, segmenter=None, out_di
     order = sorted(range(len(reg_rows)), key=lambda k: (round(reg_rows[k][1].centroid.y, 0) * -1, reg_rows[k][1].centroid.x))
     reg_rows = [reg_rows[k] for k in order]
     bid = {lab_id: f"B-{n + 1:04d}" for n, (lab_id, _, _) in enumerate(reg_rows)}
-    buildings = gpd.GeoDataFrame(
-        [{"building_id": bid[l], "area_m2": round(g.area, 1), "vertices": len(g.exterior.coords) - 1,
-          "sam_quality": round((i.pred_iou + i.stability) / 2, 3)} for l, g, i in reg_rows],
-        geometry=[g for _, g, _ in reg_rows], crs=crs)
+    b_rows = []
+    for lab_id, g, inst in reg_rows:
+        f = feat_map[id(inst)]
+        b_rows.append({
+            "building_id": bid[lab_id], "area_m2": round(g.area, 1), "vertices": len(g.exterior.coords) - 1,
+            "sam_quality": round((inst.pred_iou + inst.stability) / 2, 3),
+            "veg_frac": round(f.veg_frac, 3), "sat": round(f.sat, 3), "val": round(f.val, 3),
+            "hue": round(f.hue, 1), "rect": round(f.rect, 3), "solidity": round(f.solidity, 3),
+            "ground_likeness": round(ground_likeness(f), 3)
+        })
+    buildings = gpd.GeoDataFrame(b_rows, geometry=[g for _, g, _ in reg_rows], crs=crs)
     buildings_raw = gpd.GeoDataFrame(
         [{"building_id": bid.get(l, ""), "vertices": len(g.exterior.coords) - 1} for l, g in raw_rows if l in bid],
         geometry=[g for l, g in raw_rows if l in bid], crs=crs)
@@ -168,23 +176,62 @@ def run_scene(scene: Scene, params: Params | None = None, segmenter=None, out_di
     issues_after = validate(parcels_fixed, buildings, road_union, p)
     timings["topology_s"] = round(time.time() - t, 1)
 
-    # review priority (triage, NOT an accuracy claim)
+    # review priority from class uncertainty and topology flags (NOT from SAM stability)
     sev = {"error": 2, "warning": 1, "info": 0}
     flag = {}
     for iss in issues_after:
         for x in iss.parcel_ids:
             flag[x] = max(flag.get(x, 0), sev[iss.severity])
-    # building-level issues (no parcel_ids) are located spatially
-    q = {b["building_id"]: b["sam_quality"] for b in buildings.to_dict("records")}
-    prio, notes = [], []
+    b_props = {b["building_id"]: b for b in buildings.to_dict("records")}
+    prio, reasons = [], []
     for r in parcels_fixed.to_dict("records"):
-        f = flag.get(r["parcel_id"], 0)
-        qual = q.get(r["building_id"], 0.0)
-        pr = "High" if (f == 2 or qual < 0.86) else ("Medium" if (f == 1 or qual < 0.92) else "Low")
+        bp = b_props.get(r["building_id"], {})
+        vf = bp.get("veg_frac", 0.0)
+        p_veg = r.get("vegetation_share", 0.0)
+        eff_veg = max(vf, p_veg)
+        gl = bp.get("ground_likeness", 0.0)
+        sol = bp.get("solidity", 1.0)
+        rect_val = bp.get("rect", 1.0)
+        area = r["area_m2"]
+        topo_flag = flag.get(r["parcel_id"], 0)
+
+        rlist = []
+        pr = "Low"
+        # High priority: topology errors or strong class uncertainty
+        if topo_flag == 2:
+            pr = "High"
+            rlist.append("topology error")
+        elif eff_veg >= 0.45:
+            pr = "High"
+            rlist.append(f"{int(eff_veg * 100)}% vegetation")
+        elif gl >= 0.55:
+            pr = "High"
+            rlist.append("dark earth colour")
+        elif topo_flag == 1:
+            pr = "Medium" if pr == "Low" else pr
+            rlist.append("topology warning")
+        elif eff_veg >= 0.30:
+            pr = "Medium" if pr == "Low" else pr
+            rlist.append(f"{int(eff_veg * 100)}% vegetation")
+        elif gl >= 0.35:
+            pr = "Medium" if pr == "Low" else pr
+            rlist.append("ground-like appearance")
+        elif sol < 0.80 or rect_val < 0.58:
+            pr = "Medium" if pr == "Low" else pr
+            rlist.append("irregular shape")
+        elif area < 15 or area > 800:
+            pr = "Medium" if pr == "Low" else pr
+            rlist.append(f"area {round(area, 0)} m² outlier")
+
         prio.append(pr)
+        reasons.append(", ".join(rlist) if rlist else "")
+
     parcels_fixed = parcels_fixed.copy()
-    parcels_fixed["sam_quality"] = parcels_fixed["building_id"].map(q).round(3)
+    for col in ("veg_frac", "sat", "val", "hue", "rect", "solidity", "ground_likeness"):
+        parcels_fixed[col] = parcels_fixed["building_id"].map(lambda bid, c=col: b_props.get(bid, {}).get(c, 0.0))
+    parcels_fixed["sam_quality"] = parcels_fixed["building_id"].map(lambda bid: b_props.get(bid, {}).get("sam_quality", 0.0)).round(3)
     parcels_fixed["review_priority"] = prio
+    parcels_fixed["review_reasons"] = reasons
     issues_gdf = _issues_gdf(issues_after, crs)
     issues_before_gdf = _issues_gdf(issues_before, crs)
 

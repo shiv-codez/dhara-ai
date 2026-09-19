@@ -45,9 +45,10 @@ function ParcelTab({ parcel, statuses, onStatus, audit, issues, editing, onEditS
         <div><dt>Vegetation share</dt><dd>{Math.round(p.vegetation_share * 100)}%</dd></div>
         <div><dt>Land use (rule-based)</dt><dd>{p.landuse}</dd></div>
         <div><dt>Review priority</dt><dd className={`prio ${p.review_priority.toLowerCase()}`}>{p.review_priority}</dd></div>
+        {p.review_reasons && <div><dt>Why this needs a look</dt><dd>{p.review_reasons}</dd></div>}
         <div><dt>Segment quality</dt><dd>{fmt(p.sam_quality, 2)}</dd></div>
       </dl>
-      <p className="fine">Segment quality is the model's own stability estimate for the building outline. It is not a measured accuracy.</p>
+      <p className="fine">Segment quality is the model's own stability estimate for the building outline, not a measured accuracy. Priority is from class evidence and topology flags.</p>
 
       {mine.length > 0 && (
         <section>
