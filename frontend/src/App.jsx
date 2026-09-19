@@ -1,13 +1,90 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import MapView from './components/MapView.jsx'
 import StepRail from './components/StepRail.jsx'
-import RightPanel from './components/RightPanel.jsx'
+import RightPanel, { sortQueueFeatures } from './components/RightPanel.jsx'
 import Legend from './components/Legend.jsx'
 import { STEPS, STATUS } from './lib/steps.js'
 import { loadIndex, loadScene, loadSaved, saveSaved, download, exportParcels } from './lib/data.js'
-import { overlapsFor, resolveOverlaps, areaM2 } from './lib/geo.js'
+import { overlapsFor, resolveOverlaps, areaM2, boundsOf } from './lib/geo.js'
 
 const STEP_MS = 2600
+
+function BulkConfirmModal({ count, onConfirm, onCancel }) {
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="bulk-modal-title">
+      <div className="modal-box">
+        <h3 id="bulk-modal-title">Bulk approve Low priority parcels</h3>
+        <p className="lead">
+          Approve <b>{count}</b> candidate {count === 1 ? 'parcel' : 'parcels'} currently in Draft.
+        </p>
+        <div className="callout info">
+          <p>
+            These parcels will be marked as <b>Approved</b> candidates (unreviewed, <code>decided_by: "bulk"</code>).
+          </p>
+          <p className="fine">
+            Only parcels with priority <b>Low</b> (no high vegetation share, no dark earth classification flags, and no topology issues) and status <b>Draft</b> will be updated. Already reviewed parcels are preserved.
+          </p>
+        </div>
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="button" className="btn ok" disabled={count === 0} onClick={onConfirm}>
+            Approve {count} {count === 1 ? 'parcel' : 'parcels'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CompareSliderOverlay({ pos, onChange, stageRef }) {
+  const isDragging = useRef(false)
+
+  const handlePointerDown = (e) => {
+    isDragging.current = true
+    try {
+      e.target.setPointerCapture?.(e.pointerId)
+    } catch {}
+  }
+
+  const handlePointerMove = (e) => {
+    if (!isDragging.current || !stageRef.current) return
+    const rect = stageRef.current.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const pct = Math.max(0, Math.min(100, (x / rect.width) * 100))
+    onChange(Math.round(pct * 10) / 10)
+  }
+
+  const handlePointerUp = (e) => {
+    isDragging.current = false
+    try {
+      e.target.releasePointerCapture?.(e.pointerId)
+    } catch {}
+  }
+
+  return (
+    <div
+      className="compare-slider-container"
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+    >
+      <div
+        className="compare-divider"
+        style={{ left: `${pos}%` }}
+        onPointerDown={handlePointerDown}
+      >
+        <div className="compare-handle" aria-label="Drag compare slider" title="Drag to compare raw orthomosaic and detections">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <path d="M8 7l-5 5 5 5M16 7l5 5-5 5" />
+          </svg>
+        </div>
+      </div>
+      <span className="compare-badge left">Raw Ortho</span>
+      <span className="compare-badge right">Detections &amp; Parcels</span>
+    </div>
+  )
+}
 
 export default function App() {
   const [index, setIndex] = useState([])
@@ -29,6 +106,11 @@ export default function App() {
   const [fillOpacity, setFillOpacity] = useState(0.35)
   const [fitNonce, setFitNonce] = useState(0)
 
+  // Compare Slider State
+  const [compareActive, setCompareActive] = useState(false)
+  const [comparePos, setComparePos] = useState(50)
+
+  // Parcel & Review State
   const [parcels, setParcels] = useState(null)
   const [rebuildKey, setRebuildKey] = useState(0)
   const [statuses, setStatuses] = useState({})
@@ -39,7 +121,13 @@ export default function App() {
   const [tab, setTab] = useState('parcel')
   const [focus, setFocus] = useState(null)
   const [menuOpen, setMenuOpen] = useState(false)
+
+  // Bulk Actions
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false)
+  const [bulkUndoState, setBulkUndoState] = useState(null)
+
   const timers = useRef([])
+  const stageRef = useRef(null)
 
   // ------------------------------------------------------------------ load scenes
   useEffect(() => {
@@ -63,6 +151,7 @@ export default function App() {
         setStatuses(saved.statuses || {})
         setAudit(saved.audit || [])
         setSelectedId(null); setEditingId(null); setOverlaps([])
+        setBulkUndoState(null)
         setRebuildKey((k) => k + 1)
         setScene(s)
         goStep(0, false)
@@ -107,20 +196,32 @@ export default function App() {
   useEffect(() => clearTimers, [])
   const manualStep = (i) => { stop(); goStep(i, false) }
 
-  // ------------------------------------------------------------------ review actions
-  const log = (parcel, text) => setAudit((a) => [...a, { t: new Date().toISOString(), parcel, text }])
-  const setStatus = (id, status, note) => {
-    setStatuses((s) => ({ ...s, [id]: { status, note: note || s[id]?.note || '' } }))
-    log(id, `${STATUS[status].label}${note ? ` - ${note}` : ''}`)
-  }
-  const select = (id) => {
+  // ------------------------------------------------------------------ review actions & provenance
+  const log = useCallback((parcel, text, decidedBy = 'individual') => {
+    setAudit((a) => [...a, { t: new Date().toISOString(), parcel, text, decided_by: decidedBy }])
+  }, [])
+
+  const setStatus = useCallback((id, status, note, decidedBy = 'individual') => {
+    setStatuses((s) => ({
+      ...s,
+      [id]: {
+        status,
+        note: note !== undefined ? note : s[id]?.note || '',
+        decided_by: decidedBy,
+      },
+    }))
+    const statusLabel = STATUS[status]?.label || status
+    log(id, `${statusLabel}${note ? ` - ${note}` : ''}`, decidedBy)
+  }, [log])
+
+  const select = useCallback((id) => {
     if (editingId && id !== editingId) finishEdit()
     setSelectedId(id)
     if (id) {
       setTab('parcel')
       if (!rightOpen) setRightOpen(true)
     }
-  }
+  }, [editingId, rightOpen])
 
   const onGeometryEdit = (id, geometry) => {
     setParcels((fc) => {
@@ -130,32 +231,230 @@ export default function App() {
       return { ...fc, features }
     })
   }
-  const startEdit = () => { setEditingId(selectedId); setOverlaps([]) }
-  const finishEdit = () => {
-    if (!editingId) return
+  const startEdit = useCallback(() => {
+    if (selectedId) {
+      setEditingId(selectedId)
+      setOverlaps([])
+    }
+  }, [selectedId])
+
+  const finishEdit = useCallback(() => {
+    if (!editingId || !parcels || !scene) return
     const f = parcels.features.find((x) => x.properties.parcel_id === editingId)
     const orig = scene.data.parcels.features.find((x) => x.properties.parcel_id === editingId)
-    log(editingId, `Boundary edited (${areaM2(orig).toFixed(1)} to ${areaM2(f).toFixed(1)} m²)${overlaps.length ? ', overlap left unresolved' : ''}`)
-    setEditingId(null); setOverlaps([])
-  }
+    if (f && orig) {
+      log(editingId, `Boundary edited (${areaM2(orig).toFixed(1)} to ${areaM2(f).toFixed(1)} m²)${overlaps.length ? ', overlap left unresolved' : ''}`, 'individual')
+    }
+    setEditingId(null)
+    setOverlaps([])
+  }, [editingId, parcels, scene, overlaps, log])
+
   const resolve = () => {
     const f = parcels.features.find((x) => x.properties.parcel_id === editingId)
     const geometry = resolveOverlaps(f, overlaps, parcels.features)
     setParcels((fc) => ({ ...fc, features: fc.features.map((x) => (x.properties.parcel_id === editingId ? { ...x, geometry } : x)) }))
-    log(editingId, `Overlap with ${overlaps.map((o) => o.with.slice(-4)).join(', ')} resolved`)
-    setOverlaps([]); setRebuildKey((k) => k + 1)
-  }
-  const resetEdits = () => {
-    if (!scene) return
-    setParcels(scene.data.parcels); setStatuses({}); setAudit([]); setEditingId(null); setOverlaps([]); setSelectedId(null)
+    log(editingId, `Overlap with ${overlaps.map((o) => o.with.slice(-4)).join(', ')} resolved`, 'individual')
+    setOverlaps([])
     setRebuildKey((k) => k + 1)
   }
 
-  // ------------------------------------------------------------------ derived
+  const resetEdits = () => {
+    if (!scene) return
+    setParcels(scene.data.parcels)
+    setStatuses({})
+    setAudit([])
+    setEditingId(null)
+    setOverlaps([])
+    setSelectedId(null)
+    setBulkUndoState(null)
+    setRebuildKey((k) => k + 1)
+  }
+
+  // ------------------------------------------------------------------ bulk actions
+  const bulkApproveLow = useCallback(() => {
+    if (!parcels) return
+    const lowDraftFeatures = parcels.features.filter((f) => {
+      const prio = f.properties.review_priority
+      const st = statuses[f.properties.parcel_id]?.status || 'draft'
+      return prio === 'Low' && st === 'draft'
+    })
+    if (lowDraftFeatures.length === 0) return
+
+    const prevMap = {}
+    const newStatuses = { ...statuses }
+    const affectedIds = []
+
+    lowDraftFeatures.forEach((f) => {
+      const id = f.properties.parcel_id
+      affectedIds.push(id)
+      prevMap[id] = statuses[id] || { status: 'draft' }
+      newStatuses[id] = {
+        status: 'approved',
+        note: 'Bulk approved (Low priority candidate)',
+        decided_by: 'bulk',
+      }
+    })
+
+    setStatuses(newStatuses)
+    setBulkUndoState({ count: affectedIds.length, ids: affectedIds, prevMap })
+    log('ALL_LOW', `Bulk approved ${affectedIds.length} Low priority candidate parcels`, 'bulk')
+  }, [parcels, statuses, log])
+
+  const undoBulkApprove = useCallback(() => {
+    if (!bulkUndoState) return
+    const { ids, prevMap } = bulkUndoState
+    setStatuses((s) => {
+      const next = { ...s }
+      ids.forEach((id) => {
+        if (prevMap[id]) {
+          next[id] = prevMap[id]
+        } else {
+          delete next[id]
+        }
+      })
+      return next
+    })
+    log('ALL_LOW', `Undid bulk approval of ${ids.length} Low priority parcels`, 'bulk')
+    setBulkUndoState(null)
+  }, [bulkUndoState, log])
+
+  // ------------------------------------------------------------------ review queue navigation
+  const sortedQueue = useMemo(() => (parcels ? sortQueueFeatures(parcels.features) : []), [parcels])
+
+  const goToNextInQueue = useCallback(() => {
+    if (!sortedQueue.length) return
+    const unreviewed = sortedQueue.filter((f) => (statuses[f.properties.parcel_id]?.status || 'draft') === 'draft')
+    if (unreviewed.length === 0) {
+      const currIdx = sortedQueue.findIndex((f) => f.properties.parcel_id === selectedId)
+      const nextFeature = sortedQueue[(currIdx + 1) % sortedQueue.length]
+      if (nextFeature) {
+        select(nextFeature.properties.parcel_id)
+        setFocus({ bounds: boundsOf(nextFeature), nonce: Date.now() })
+      }
+      return
+    }
+
+    if (!selectedId) {
+      const first = unreviewed[0]
+      select(first.properties.parcel_id)
+      setFocus({ bounds: boundsOf(first), nonce: Date.now() })
+      return
+    }
+
+    const currIdx = sortedQueue.findIndex((f) => f.properties.parcel_id === selectedId)
+    let nextUnreviewed = sortedQueue.slice(currIdx + 1).find((f) => (statuses[f.properties.parcel_id]?.status || 'draft') === 'draft')
+    if (!nextUnreviewed) {
+      nextUnreviewed = unreviewed[0]
+    }
+    if (nextUnreviewed) {
+      select(nextUnreviewed.properties.parcel_id)
+      setFocus({ bounds: boundsOf(nextUnreviewed), nonce: Date.now() })
+    }
+  }, [sortedQueue, statuses, selectedId, select])
+
+  // ------------------------------------------------------------------ keyboard shortcuts
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      // 1. Guard against active typing in inputs, textareas, selects, contenteditable
+      const active = document.activeElement
+      if (
+        active &&
+        (active.tagName === 'INPUT' ||
+          active.tagName === 'TEXTAREA' ||
+          active.tagName === 'SELECT' ||
+          active.isContentEditable)
+      ) {
+        return
+      }
+
+      // 2. Escape key handles modals, menu, editing, and selection
+      if (e.key === 'Escape' || e.key === 'Esc') {
+        if (bulkConfirmOpen) {
+          setBulkConfirmOpen(false)
+          e.preventDefault()
+          return
+        }
+        if (menuOpen) {
+          setMenuOpen(false)
+          e.preventDefault()
+          return
+        }
+        if (editingId) {
+          finishEdit()
+          e.preventDefault()
+          return
+        }
+        if (selectedId) {
+          select(null)
+          e.preventDefault()
+          return
+        }
+        return
+      }
+
+      // 3. Guard against open modal or dropdown menu
+      if (bulkConfirmOpen || menuOpen) return
+
+      // 4. Guard against boundary editing (only Esc is allowed during editing)
+      if (editingId) return
+
+      const key = e.key.toUpperCase()
+
+      if (key === 'N') {
+        e.preventDefault()
+        goToNextInQueue()
+        return
+      }
+
+      if (selectedId) {
+        if (key === 'A') {
+          e.preventDefault()
+          setStatus(selectedId, 'approved', undefined, 'individual')
+        } else if (key === 'F') {
+          e.preventDefault()
+          setStatus(selectedId, 'flagged', undefined, 'individual')
+        } else if (key === 'R') {
+          e.preventDefault()
+          setStatus(selectedId, 'rejected', undefined, 'individual')
+        } else if (key === 'E') {
+          e.preventDefault()
+          startEdit()
+        }
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [
+    selectedId,
+    editingId,
+    bulkConfirmOpen,
+    menuOpen,
+    goToNextInQueue,
+    setStatus,
+    startEdit,
+    finishEdit,
+    select,
+  ])
+
+  // ------------------------------------------------------------------ derived counts
+  const total = parcels?.features.length || 0
+  const reviewed = Object.values(statuses).filter((s) => s.status && s.status !== 'draft').length
+  const approved = Object.values(statuses).filter((s) => s.status === 'approved').length
+  const flagged = Object.values(statuses).filter((s) => s.status === 'flagged').length
+  const rejected = Object.values(statuses).filter((s) => s.status === 'rejected').length
+
+  const lowDraftCount = useMemo(() => {
+    if (!parcels) return 0
+    return parcels.features.filter((f) => {
+      const isLow = f.properties.review_priority === 'Low'
+      const isDraft = (statuses[f.properties.parcel_id]?.status || 'draft') === 'draft'
+      return isLow && isDraft
+    }).length
+  }, [parcels, statuses])
+
   const parcel = useMemo(() => parcels?.features.find((f) => f.properties.parcel_id === selectedId) || null, [parcels, selectedId])
   const issues = useMemo(() => (scene ? (fixMode === 'before' ? scene.data.issues_before_fix : scene.data.issues).features : []), [scene, fixMode])
-  const reviewed = Object.values(statuses).filter((s) => s.status !== 'draft').length
-  const approved = Object.values(statuses).filter((s) => s.status === 'approved').length
   const styleMode = STEPS[stepIdx].styleMode || 'landuse'
 
   if (error) return <div className="boot"><h1>Dhara.ai</h1><p>{error}</p></div>
@@ -168,6 +467,7 @@ export default function App() {
     <div className={appClasses}>
       <header className="top">
         <button
+          type="button"
           className="panel-toggle-btn"
           onClick={() => setLeftOpen((o) => !o)}
           title={leftOpen ? 'Hide pipeline rail' : 'Show pipeline rail'}
@@ -198,22 +498,95 @@ export default function App() {
           </select>
         </label>
 
+        {/* Live Officer Header Progress */}
+        <div className="header-progress" aria-label="Review progress">
+          <div className="progress-summary">
+            <span className="progress-label">Reviewed <b>{reviewed}</b>/{total}</span>
+            <span className="progress-badge approved" title={`${approved} approved`}>
+              <span className="dot-mini" /> <b>{approved}</b> approved
+            </span>
+            <span className="progress-badge flagged" title={`${flagged} field check`}>
+              <span className="dot-mini" /> <b>{flagged}</b> field check
+            </span>
+            <span className="progress-badge rejected" title={`${rejected} rejected`}>
+              <span className="dot-mini" /> <b>{rejected}</b> rejected
+            </span>
+          </div>
+          <div className="multi-progress-bar" role="progressbar" aria-valuenow={reviewed} aria-valuemin="0" aria-valuemax={total}>
+            <span className="bar-approved" style={{ width: `${(approved / Math.max(total, 1)) * 100}%` }} />
+            <span className="bar-flagged" style={{ width: `${(flagged / Math.max(total, 1)) * 100}%` }} />
+            <span className="bar-rejected" style={{ width: `${(rejected / Math.max(total, 1)) * 100}%` }} />
+          </div>
+        </div>
+
         <div className="top-right">
-          {m.georef_source === 'assumed_demo' && <span className="chip" title="Demo image without survey metadata">Assumed georeference</span>}
+          {m.georef_source === 'assumed_demo' && (
+            <span className="chip" title="Demo image without survey metadata">
+              Assumed georeference
+            </span>
+          )}
           <span className="chip draft">All parcels: draft, pending officer review</span>
           <div className="menu">
-            <button className="btn" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}>Export</button>
+            <button
+              type="button"
+              className="btn"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((o) => !o)}
+            >
+              Export
+            </button>
             {menuOpen && (
               <div className="menu-list" role="menu" onMouseLeave={() => setMenuOpen(false)}>
-                <button role="menuitem" onClick={() => { download(`${scene.id}_approved.geojson`, exportParcels(parcels, statuses, 'approved')); setMenuOpen(false) }}>Approved parcels (GeoJSON)</button>
-                <button role="menuitem" onClick={() => { download(`${scene.id}_dhara_candidates.geojson`, exportParcels(parcels, statuses)); setMenuOpen(false) }}>All candidate parcels (GeoJSON)</button>
-                <a role="menuitem" href={scene.urls.gpkg} download onClick={() => setMenuOpen(false)}>GeoPackage for QGIS / ArcGIS</a>
-                <button role="menuitem" onClick={() => { download(`${scene.id}_audit.json`, JSON.stringify(audit, null, 1), 'application/json'); setMenuOpen(false) }}>Review audit log (JSON)</button>
-                <button role="menuitem" className="danger" onClick={() => { resetEdits(); setMenuOpen(false) }}>Discard my edits and decisions</button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    download(`${scene.id}_approved.geojson`, exportParcels(parcels, statuses, 'approved'))
+                    setMenuOpen(false)
+                  }}
+                >
+                  Approved parcels (GeoJSON)
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    download(`${scene.id}_dhara_candidates.geojson`, exportParcels(parcels, statuses))
+                    setMenuOpen(false)
+                  }}
+                >
+                  All candidate parcels (GeoJSON)
+                </button>
+                <a role="menuitem" href={scene.urls.gpkg} download onClick={() => setMenuOpen(false)}>
+                  GeoPackage for QGIS / ArcGIS
+                </a>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    download(`${scene.id}_audit.json`, JSON.stringify(audit, null, 1), 'application/json')
+                    setMenuOpen(false)
+                  }}
+                >
+                  Review audit log (JSON)
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="danger"
+                  onClick={() => {
+                    resetEdits()
+                    setMenuOpen(false)
+                  }}
+                >
+                  Discard my edits and decisions
+                </button>
               </div>
             )}
           </div>
           <button
+            type="button"
             className="panel-toggle-btn"
             onClick={() => setRightOpen((o) => !o)}
             title={rightOpen ? 'Hide inspector panel' : 'Show inspector panel'}
@@ -229,21 +602,54 @@ export default function App() {
 
       {leftOpen && (
         <StepRail
-          stepIdx={stepIdx} onStep={manualStep} playing={playing} onPlay={play} onStop={stop}
-          vis={vis} onToggleLayer={(k) => setVis((v) => ({ ...v, [k]: !v[k] }))}
-          regMode={regMode} onRegMode={setRegMode} fixMode={fixMode} onFixMode={setFixMode} manifest={m}
+          stepIdx={stepIdx}
+          onStep={manualStep}
+          playing={playing}
+          onPlay={play}
+          onStop={stop}
+          vis={vis}
+          onToggleLayer={(k) => setVis((v) => ({ ...v, [k]: !v[k] }))}
+          regMode={regMode}
+          onRegMode={setRegMode}
+          fixMode={fixMode}
+          onFixMode={setFixMode}
+          manifest={m}
         />
       )}
 
-      <main className="stage">
+      <main ref={stageRef} className="stage">
         <MapView
-          scene={scene} vis={vis} regMode={regMode} fixMode={fixMode} styleMode={styleMode}
-          parcels={parcels} rebuildKey={rebuildKey} statuses={statuses} selectedId={selectedId} onSelect={select}
-          editingId={editingId} onGeometryEdit={onGeometryEdit} overlaps={overlaps} focus={focus}
-          fillEnabled={fillEnabled} fillOpacity={fillOpacity} fitNonce={fitNonce}
+          scene={scene}
+          vis={vis}
+          regMode={regMode}
+          fixMode={fixMode}
+          styleMode={styleMode}
+          parcels={parcels}
+          rebuildKey={rebuildKey}
+          statuses={statuses}
+          selectedId={selectedId}
+          onSelect={select}
+          editingId={editingId}
+          onGeometryEdit={onGeometryEdit}
+          overlaps={overlaps}
+          focus={focus}
+          fillEnabled={fillEnabled}
+          fillOpacity={fillOpacity}
+          fitNonce={fitNonce}
+          compareActive={compareActive}
+          comparePos={comparePos}
         />
 
         {scanNonce > 0 && <div key={scanNonce} className="scan" aria-hidden="true" />}
+
+        {/* Compare Swipe Slider Overlay */}
+        {compareActive && (
+          <CompareSliderOverlay
+            pos={comparePos}
+            onChange={setComparePos}
+            stageRef={stageRef}
+          />
+        )}
 
         {/* Stage Floating Controls */}
         <div className="stage-tag">
@@ -253,6 +659,7 @@ export default function App() {
 
         <div className="map-toolbar" role="toolbar" aria-label="Map display controls">
           <button
+            type="button"
             className="tool-btn"
             onClick={() => setFitNonce((n) => n + 1)}
             title="Fit view to scene extent"
@@ -262,6 +669,19 @@ export default function App() {
               <path d="M3 9V3h6M15 3h6v6M21 15v6h-6M9 21H3v-6" />
             </svg>
             <span>Fit view</span>
+          </button>
+
+          <button
+            type="button"
+            className={`tool-btn ${compareActive ? 'active' : ''}`}
+            onClick={() => setCompareActive((c) => !c)}
+            title="Compare raw orthomosaic with candidate layers (swipe)"
+            aria-label="Compare raw orthomosaic with candidate layers"
+          >
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 3v18M8 8l-4 4 4 4M16 8l4 4-4 4" />
+            </svg>
+            <span>Compare</span>
           </button>
 
           {styleMode !== 'status' && (
@@ -298,12 +718,44 @@ export default function App() {
 
       {rightOpen && (
         <RightPanel
-          tab={tab} onTab={setTab} manifest={m}
-          parcel={parcel} statuses={statuses} onStatus={setStatus} audit={audit}
-          issues={issues} fixMode={fixMode} onFocus={(b) => setFocus({ bounds: b, nonce: Date.now() })}
-          editing={!!editingId} onEditStart={startEdit} onEditDone={finishEdit}
-          overlaps={overlaps} onResolve={resolve}
-          reviewed={reviewed} approved={approved} total={parcels.features.length}
+          tab={tab}
+          onTab={setTab}
+          manifest={m}
+          parcels={parcels}
+          parcel={parcel}
+          statuses={statuses}
+          onStatus={setStatus}
+          audit={audit}
+          issues={issues}
+          fixMode={fixMode}
+          onFocus={(b) => setFocus({ bounds: b, nonce: Date.now() })}
+          editing={!!editingId}
+          onEditStart={startEdit}
+          onEditDone={finishEdit}
+          overlaps={overlaps}
+          onResolve={resolve}
+          reviewed={reviewed}
+          approved={approved}
+          flagged={flagged}
+          rejected={rejected}
+          total={total}
+          onSelect={select}
+          onNextInQueue={goToNextInQueue}
+          onBulkApproveOpen={() => setBulkConfirmOpen(true)}
+          bulkUndoState={bulkUndoState}
+          onUndoBulk={undoBulkApprove}
+        />
+      )}
+
+      {/* Bulk Approval Confirmation Modal */}
+      {bulkConfirmOpen && (
+        <BulkConfirmModal
+          count={lowDraftCount}
+          onConfirm={() => {
+            bulkApproveLow()
+            setBulkConfirmOpen(false)
+          }}
+          onCancel={() => setBulkConfirmOpen(false)}
         />
       )}
     </div>

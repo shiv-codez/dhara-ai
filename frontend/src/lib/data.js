@@ -59,16 +59,18 @@ export function exportParcels(parcels, statuses, only) {
   const features = parcels.features
     .map((f) => {
       const s = statuses[f.properties.parcel_id] || { status: 'draft' }
+      const isDraft = !s.status || s.status === 'draft'
       return {
         ...f,
         properties: {
           ...f.properties,
-          status: s.status === 'draft' ? 'Draft / Unverified' : s.status,
+          status: isDraft ? 'Draft / Unverified' : s.status,
           reviewer_note: s.note || '',
+          decided_by: isDraft ? '' : (s.decided_by || 'individual'),
           area_m2: Math.round(areaM2(f) * 10) / 10,
         },
       }
     })
-    .filter((f) => !only || f.properties.status === only)
+    .filter((f) => !only || (only === 'approved' ? f.properties.status === 'approved' : f.properties.status === only))
   return JSON.stringify({ type: 'FeatureCollection', features })
 }

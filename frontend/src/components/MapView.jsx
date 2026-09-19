@@ -72,6 +72,8 @@ export default function MapView({
   fillEnabled = false,
   fillOpacity = 0.35,
   fitNonce = 0,
+  compareActive = false,
+  comparePos = 50,
 }) {
   const el = useRef(null)
   const map = useRef(null)
@@ -446,6 +448,23 @@ export default function MapView({
     const b = L.latLngBounds(focus.bounds)
     map.current.flyToBounds(b.pad(1.2), { maxZoom: 22, duration: reduceMotion() ? 0 : 0.6 })
   }, [focus])
+
+  // ---------------------------------------------------------------- compare slider clipping
+  useEffect(() => {
+    const m = map.current
+    if (!m) return
+    const overlayPanes = ['segPane', 'maskPane', 'bldPane', 'parcelPane', 'overlapPane', 'issuePane', 'labelPane']
+    overlayPanes.forEach((paneName) => {
+      const p = m.getPane(paneName)
+      if (p) {
+        if (compareActive) {
+          p.style.clipPath = `polygon(${comparePos}% 0, 100% 0, 100% 100%, ${comparePos}% 100%)`
+        } else {
+          p.style.clipPath = ''
+        }
+      }
+    })
+  }, [compareActive, comparePos])
 
   return <div ref={el} className="map" role="application" aria-label="Parcel map" />
 }

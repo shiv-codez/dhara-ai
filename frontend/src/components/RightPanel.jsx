@@ -1,110 +1,369 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useRef, useLayoutEffect } from 'react'
 import { STATUS, ISSUE_LABEL } from '../lib/steps.js'
 import { areaM2, boundsOf } from '../lib/geo.js'
 
 const fmt = (n, d = 0) => Number(n).toLocaleString('en-IN', { maximumFractionDigits: d, minimumFractionDigits: d })
+
+export const PRIO_RANK = { High: 0, Medium: 1, Low: 2 }
+
+export function sortQueueFeatures(features) {
+  if (!features) return []
+  return [...features].sort((a, b) => {
+    const prA = PRIO_RANK[a.properties.review_priority] ?? 2
+    const prB = PRIO_RANK[b.properties.review_priority] ?? 2
+    if (prA !== prB) return prA - prB
+    const areaA = a.properties.area_m2 || (a.geometry ? areaM2(a) : 0) || 0
+    const areaB = b.properties.area_m2 || (b.geometry ? areaM2(b) : 0) || 0
+    return areaB - areaA
+  })
+}
 
 function Pill({ status }) {
   const s = STATUS[status] || STATUS.draft
   return <span className="pill" style={{ '--c': s.color }}>{s.label}</span>
 }
 
-/* ------------------------------------------------------------------------------------- parcel */
-function ParcelTab({ parcel, statuses, onStatus, audit, issues, editing, onEditStart, onEditDone, overlaps, onResolve, reviewed, total }) {
-  const [note, setNote] = useState('')
-  if (!parcel) {
+function StatusIcon({ status }) {
+  const st = status || 'draft'
+  if (st === 'approved') {
     return (
-      <div className="pane-empty">
-        <p className="lead">Select a parcel on the map.</p>
-        <p>You will see what the pipeline knows about it, and can edit its boundary and record a decision.</p>
-        <div className="progress" aria-label="Review progress">
-          <div className="bar"><span style={{ width: `${(reviewed / Math.max(total, 1)) * 100}%` }} /></div>
-          <p className="fine">{reviewed} of {total} parcels reviewed</p>
-        </div>
-      </div>
+      <span className="queue-status-icon approved" title="Approved" aria-label="Approved">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
+          <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z" />
+        </svg>
+      </span>
     )
   }
-  const p = parcel.properties
-  const st = statuses[p.parcel_id] || { status: 'draft' }
-  const mine = issues.filter((i) => i.properties.parcel_ids?.split(',').includes(p.parcel_id))
-  const log = audit.filter((a) => a.parcel === p.parcel_id).slice(-4).reverse()
-  const decide = (status) => { onStatus(p.parcel_id, status, note); setNote('') }
+  if (st === 'flagged') {
+    return (
+      <span className="queue-status-icon flagged" title="Needs field check" aria-label="Needs field check">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
+          <path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z" />
+        </svg>
+      </span>
+    )
+  }
+  if (st === 'rejected') {
+    return (
+      <span className="queue-status-icon rejected" title="Rejected" aria-label="Rejected">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
+          <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.749.749 0 0 1 1.275.326.749.749 0 0 1-.215.734L9.06 8l3.22 3.22a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-3.22 3.22a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z" />
+        </svg>
+      </span>
+    )
+  }
+  return <span className="queue-status-icon draft" title="Draft / Unverified" aria-label="Draft" />
+}
+
+/* ------------------------------------------------------------------------------------- parcel queue item */
+function QueueRow({ feature, isSelected, statusObj, onSelect, onFocus }) {
+  const p = feature.properties
+  const id = p.parcel_id
+  const shortId = id.slice(-4)
+  const st = statusObj?.status || 'draft'
+  const prio = p.review_priority || 'Low'
+  const area = p.area_m2 || (feature.geometry ? Math.round(areaM2(feature) * 10) / 10 : 0)
+
+  const handleClick = () => {
+    onSelect(id)
+    if (feature.geometry) {
+      onFocus(boundsOf(feature))
+    }
+  }
+
   return (
-    <div className="parcel">
-      <header className="parcel-head">
-        <div>
-          <h2>Plot {p.parcel_id.slice(-4)}</h2>
-          <p className="fine">{p.parcel_id}</p>
+    <button
+      type="button"
+      className={`queue-item ${isSelected ? 'selected' : ''} ${st !== 'draft' ? 'decided' : ''}`}
+      onClick={handleClick}
+      aria-current={isSelected ? 'true' : undefined}
+    >
+      <StatusIcon status={st} />
+      <div className="queue-item-main">
+        <div className="queue-item-title">
+          <span className="queue-item-id">Plot {shortId}</span>
+          <span className={`prio ${prio.toLowerCase()}`}>{prio}</span>
         </div>
-        <Pill status={st.status} />
-      </header>
+        <div className="queue-item-meta">
+          <span>{fmt(area, 0)} m²</span>
+          <span>·</span>
+          <span>{p.landuse || 'Built-up'}</span>
+        </div>
+      </div>
+      {statusObj?.decided_by === 'bulk' && (
+        <span className="badge-bulk" title="Approved in bulk">bulk</span>
+      )}
+    </button>
+  )
+}
 
-      <dl className="facts">
-        <div><dt>Area</dt><dd>{fmt(areaM2(parcel), 1)} m²</dd></div>
-        <div><dt>Building coverage</dt><dd>{Math.round(p.building_coverage * 100)}%</dd></div>
-        <div><dt>Vegetation share</dt><dd>{Math.round(p.vegetation_share * 100)}%</dd></div>
-        <div><dt>Land use (rule-based)</dt><dd>{p.landuse}</dd></div>
-        <div><dt>Review priority</dt><dd className={`prio ${p.review_priority.toLowerCase()}`}>{p.review_priority}</dd></div>
-        {p.review_reasons && <div><dt>Why this needs a look</dt><dd>{p.review_reasons}</dd></div>}
-        <div><dt>Segment quality</dt><dd>{fmt(p.sam_quality, 2)}</dd></div>
-      </dl>
-      <p className="fine">Segment quality is the model's own stability estimate for the building outline, not a measured accuracy. Priority is from class evidence and topology flags.</p>
+/* ------------------------------------------------------------------------------------- parcel tab */
+function ParcelTab({
+  parcels,
+  parcel,
+  statuses,
+  onStatus,
+  audit,
+  issues,
+  editing,
+  onEditStart,
+  onEditDone,
+  overlaps,
+  onResolve,
+  reviewed,
+  total,
+  onSelect,
+  onNextInQueue,
+  onBulkApproveOpen,
+  bulkUndoState,
+  onUndoBulk,
+  onFocus,
+}) {
+  const [note, setNote] = useState('')
+  const queueListRef = useRef(null)
+  const scrollPosRef = useRef(0)
 
-      {mine.length > 0 && (
-        <section>
-          <h3>Flags on this plot</h3>
-          <ul className="flag-list">
-            {mine.map((i) => (
-              <li key={i.properties.issue_id}><b>{ISSUE_LABEL[i.properties.type]}.</b> {i.properties.fix}</li>
-            ))}
-          </ul>
-        </section>
+  const sortedQueue = useMemo(() => (parcels ? sortQueueFeatures(parcels.features) : []), [parcels])
+
+  const unreviewedCount = useMemo(() => {
+    return sortedQueue.filter((f) => (statuses[f.properties.parcel_id]?.status || 'draft') === 'draft').length
+  }, [sortedQueue, statuses])
+
+  const lowDraftCount = useMemo(() => {
+    return sortedQueue.filter((f) => {
+      const isLow = f.properties.review_priority === 'Low'
+      const isDraft = (statuses[f.properties.parcel_id]?.status || 'draft') === 'draft'
+      return isLow && isDraft
+    }).length
+  }, [sortedQueue, statuses])
+
+  // Preserve scroll position when statuses or selection changes
+  const handleQueueScroll = (e) => {
+    scrollPosRef.current = e.target.scrollTop
+  }
+
+  useLayoutEffect(() => {
+    if (queueListRef.current) {
+      queueListRef.current.scrollTop = scrollPosRef.current
+    }
+  }, [statuses, parcel])
+
+  const selectedId = parcel?.properties?.parcel_id || null
+  const p = parcel?.properties
+  const st = (selectedId && statuses[selectedId]) || { status: 'draft' }
+  const mine = selectedId ? issues.filter((i) => i.properties.parcel_ids?.split(',').includes(selectedId)) : []
+  const log = selectedId ? audit.filter((a) => a.parcel === selectedId).slice(-4).reverse() : []
+
+  const decide = (status) => {
+    if (!selectedId) return
+    onStatus(selectedId, status, note, 'individual')
+    setNote('')
+  }
+
+  return (
+    <div className="parcel-tab-container">
+      {/* Bulk Undo Notification Banner */}
+      {bulkUndoState && (
+        <div className="bulk-undo-banner" role="status">
+          <div className="undo-msg">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="#1E8E5A">
+              <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z" />
+            </svg>
+            <span>Approved <b>{bulkUndoState.count}</b> Low priority parcels in bulk.</span>
+          </div>
+          <button type="button" className="btn btn-sm btn-undo" onClick={onUndoBulk}>
+            Undo bulk approve
+          </button>
+        </div>
       )}
 
-      <section>
-        <h3>Boundary</h3>
-        {!editing ? (
-          <button className="btn" onClick={onEditStart}>Edit boundary</button>
-        ) : (
-          <div className="edit-box">
-            <p>Drag a corner, or click the midpoint of an edge to add one.</p>
-            {overlaps.length === 0 ? (
-              <p className="ok-line">No overlap with neighbouring plots.</p>
-            ) : (
-              <div className="warn-line">
-                <p><b>Overlap:</b> {overlaps.map((o) => `${o.with.slice(-4)} by ${fmt(o.area, 1)} m²`).join(', ')}</p>
-                <button className="btn" onClick={onResolve}>Resolve: this plot gives up the overlap</button>
+      {/* Review Queue Header & Controls */}
+      <div className="queue-header">
+        <div className="queue-title-row">
+          <div>
+            <h3>Review Queue</h3>
+            <p className="fine">{unreviewedCount} of {total} unreviewed</p>
+          </div>
+          <div className="queue-actions">
+            <button
+              type="button"
+              className="btn btn-sm next-btn"
+              onClick={onNextInQueue}
+              title="Jump to next unreviewed parcel (N)"
+            >
+              Next <kbd>N</kbd>
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm bulk-btn"
+              onClick={onBulkApproveOpen}
+              disabled={lowDraftCount === 0}
+              title="Bulk approve all Low priority draft parcels"
+            >
+              Approve Low ({lowDraftCount})
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Selected Parcel Inspector */}
+      {parcel ? (
+        <div className="parcel-inspector">
+          <header className="parcel-head">
+            <div>
+              <div className="parcel-title-wrap">
+                <h2>Plot {p.parcel_id.slice(-4)}</h2>
+                <button type="button" className="btn-close-parcel" onClick={() => onSelect(null)} title="Deselect (Esc)">
+                  ✕
+                </button>
+              </div>
+              <p className="fine">{p.parcel_id}</p>
+            </div>
+            <Pill status={st.status} />
+          </header>
+
+          <dl className="facts">
+            <div><dt>Area</dt><dd>{fmt(areaM2(parcel), 1)} m²</dd></div>
+            <div><dt>Building coverage</dt><dd>{Math.round(p.building_coverage * 100)}%</dd></div>
+            <div><dt>Vegetation share</dt><dd>{Math.round(p.vegetation_share * 100)}%</dd></div>
+            <div><dt>Land use (rule-based)</dt><dd>{p.landuse}</dd></div>
+            <div><dt>Review priority</dt><dd className={`prio ${p.review_priority.toLowerCase()}`}>{p.review_priority}</dd></div>
+            {p.review_reasons && <div><dt>Why this needs a look</dt><dd className="review-reason-text">{p.review_reasons}</dd></div>}
+            <div><dt>Segment quality</dt><dd>{fmt(p.sam_quality, 2)}</dd></div>
+          </dl>
+          <p className="fine">Segment quality is the model's own stability estimate for the building outline, not a measured accuracy. Priority is from class evidence and topology flags.</p>
+
+          {mine.length > 0 && (
+            <section>
+              <h3>Flags on this plot</h3>
+              <ul className="flag-list">
+                {mine.map((i) => (
+                  <li key={i.properties.issue_id}><b>{ISSUE_LABEL[i.properties.type]}.</b> {i.properties.fix}</li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          <section>
+            <div className="section-head-with-action">
+              <h3>Boundary</h3>
+              {!editing && (
+                <button type="button" className="btn btn-sm" onClick={onEditStart}>
+                  Edit boundary <kbd>E</kbd>
+                </button>
+              )}
+            </div>
+            {editing && (
+              <div className="edit-box">
+                <p>Drag a corner, or click the midpoint of an edge to add one. Press <kbd>Esc</kbd> to exit.</p>
+                {overlaps.length === 0 ? (
+                  <p className="ok-line">No overlap with neighbouring plots.</p>
+                ) : (
+                  <div className="warn-line">
+                    <p><b>Overlap:</b> {overlaps.map((o) => `${o.with.slice(-4)} by ${fmt(o.area, 1)} m²`).join(', ')}</p>
+                    <button type="button" className="btn" onClick={onResolve}>Resolve: this plot gives up the overlap</button>
+                  </div>
+                )}
+                <button type="button" className="btn primary" onClick={onEditDone}>Done editing</button>
               </div>
             )}
-            <button className="btn primary" onClick={onEditDone}>Done editing</button>
-          </div>
-        )}
-      </section>
+          </section>
 
-      <section>
-        <h3>Decision</h3>
-        <label className="field">
-          <span>Note (optional)</span>
-          <textarea rows="2" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. boundary wall visible on the east side" />
-        </label>
-        <div className="decide">
-          <button className="btn ok" onClick={() => decide('approved')}>Approve</button>
-          <button className="btn warn" onClick={() => decide('flagged')}>Needs field check</button>
-          <button className="btn bad" onClick={() => decide('rejected')}>Reject</button>
+          <section>
+            <h3>Decision</h3>
+            <label className="field">
+              <span>Note (optional)</span>
+              <textarea
+                rows="2"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="e.g. boundary wall visible on the east side"
+              />
+            </label>
+            <div className="decide">
+              <button type="button" className="btn ok" onClick={() => decide('approved')}>
+                Approve <kbd>A</kbd>
+              </button>
+              <button type="button" className="btn warn" onClick={() => decide('flagged')}>
+                Needs field check <kbd>F</kbd>
+              </button>
+              <button type="button" className="btn bad" onClick={() => decide('rejected')}>
+                Reject <kbd>R</kbd>
+              </button>
+            </div>
+            {st.note && (
+              <p className="fine">
+                Last note: {st.note} {st.decided_by && <span className="provenance-tag">({st.decided_by})</span>}
+              </p>
+            )}
+          </section>
+
+          {log.length > 0 && (
+            <section>
+              <h3>History</h3>
+              <ul className="log">
+                {log.map((a, i) => (
+                  <li key={i}>
+                    <time>{new Date(a.t).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</time>
+                    <span>{a.text}</span>
+                    {a.decided_by && <span className="provenance-tag">{a.decided_by}</span>}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
         </div>
-        {st.note && <p className="fine">Last note: {st.note}</p>}
-      </section>
-
-      {log.length > 0 && (
-        <section>
-          <h3>History</h3>
-          <ul className="log">
-            {log.map((a, i) => (
-              <li key={i}><time>{new Date(a.t).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</time> {a.text}</li>
-            ))}
-          </ul>
-        </section>
+      ) : (
+        <div className="empty-parcel-inspector">
+          <p className="lead">Select a parcel on the map.</p>
+          <p className="fine">
+            Click any plot on the map or pick from the review queue below to inspect its land-use evidence, review priority, and record officer decisions.
+          </p>
+        </div>
       )}
+
+      {/* Interactive Review Queue List */}
+      <div className="queue-list-section">
+        <h4 className="queue-subhead">
+          <span>All Plots ({sortedQueue.length})</span>
+          <span className="fine">Sorted by priority & area</span>
+        </h4>
+        <div
+          ref={queueListRef}
+          className="queue-list"
+          onScroll={handleQueueScroll}
+          tabIndex={0}
+          role="region"
+          aria-label="Parcel review queue"
+        >
+          {sortedQueue.map((f) => {
+            const id = f.properties.parcel_id
+            return (
+              <QueueRow
+                key={id}
+                feature={f}
+                isSelected={id === selectedId}
+                statusObj={statuses[id]}
+                onSelect={onSelect}
+                onFocus={onFocus}
+              />
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Keyboard Shortcut Hints Footer */}
+      <div className="shortcut-hints" aria-label="Keyboard shortcuts guide">
+        <div className="shortcut-title">Keyboard shortcuts</div>
+        <div className="shortcut-grid">
+          <div><kbd>A</kbd> approve</div>
+          <div><kbd>F</kbd> field check</div>
+          <div><kbd>R</kbd> reject</div>
+          <div><kbd>N</kbd> next plot</div>
+          <div><kbd>E</kbd> edit boundary</div>
+          <div><kbd>Esc</kbd> deselect</div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -145,7 +404,7 @@ function ChecksTab({ manifest, issues, fixMode, onFocus }) {
 }
 
 /* ------------------------------------------------------------------------------------- report */
-function ReportTab({ manifest: m, reviewed, approved, total }) {
+function ReportTab({ manifest: m, reviewed, approved, flagged = 0, rejected = 0, total }) {
   const t = m.timings_s
   const geo = m.georef_source === 'assumed_demo'
   return (
@@ -188,6 +447,8 @@ function ReportTab({ manifest: m, reviewed, approved, total }) {
         <dl className="facts">
           <div><dt>Reviewed</dt><dd>{reviewed} of {total}</dd></div>
           <div><dt>Approved</dt><dd>{approved}</dd></div>
+          <div><dt>Needs field check</dt><dd>{flagged}</dd></div>
+          <div><dt>Rejected</dt><dd>{rejected}</dd></div>
         </dl>
         <p className="fine">{m.status_note}</p>
       </section>

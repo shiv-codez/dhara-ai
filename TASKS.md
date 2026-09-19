@@ -50,7 +50,7 @@ Acceptance: in the dense town scene labels do not overlap at the default zoom; t
 
 ---
 
-## [ ] Task 3 - Officer workflow
+## [x] Task 3 - Officer workflow
 Steps
 1. **Review queue** in the Parcel tab (or a new tab): parcels sorted by priority then area, with status icons; clicking selects and zooms.
 2. "Next flagged" button and keyboard shortcuts: `A` approve, `F` needs field check, `R` reject, `N` next in queue, `E` edit boundary, `Esc` deselect. Show a shortcut hint. Shortcuts must not fire while typing in the note box.
