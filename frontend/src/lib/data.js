@@ -44,6 +44,17 @@ export const saveSaved = (id, obj) => {
     /* storage may be blocked - the demo still works, just without persistence */
   }
 }
+export const backupSaved = (id, obj) => {
+  try {
+    const timestamp = Date.now()
+    const backupKey = `dhara:v1:${id}:backup:${timestamp}`
+    localStorage.setItem(backupKey, JSON.stringify(obj))
+    localStorage.removeItem(KEY(id))
+    return { backupKey, timestamp, data: obj }
+  } catch {
+    return null
+  }
+}
 
 export function download(name, text, type = 'application/geo+json') {
   const url = URL.createObjectURL(new Blob([text], { type }))
@@ -112,4 +123,49 @@ export function exportLabels(sceneId, parcels, statuses) {
     .filter(Boolean)
   return JSON.stringify(records, null, 2)
 }
+
+/** Export officer decisions from a backup object as training label records (JSON). */
+export function exportLabelsFromBackup(sceneId, backupObj, currentParcels) {
+  const exportedAt = new Date().toISOString()
+  const statuses = backupObj?.statuses || {}
+  const featureSnapshots = backupObj?.featureSnapshots || {}
+  const currentMap = new Map(
+    currentParcels?.features?.map((f) => [f.properties.parcel_id, f.properties]) || []
+  )
+
+  const records = Object.entries(statuses)
+    .map(([parcelId, s]) => {
+      if (!s || !s.status || s.status === 'draft') return null
+
+      let label = null
+      if (s.status === 'approved') label = 'building'
+      else if (s.status === 'rejected') label = 'not_building'
+      else if (s.status === 'field_check') label = 'needs_field_check'
+      else label = s.status
+
+      const feat = featureSnapshots[parcelId] || currentMap.get(parcelId) || {}
+
+      return {
+        scene: sceneId,
+        parcel_id: parcelId,
+        building_id: feat.building_id || '',
+        label,
+        decided_by: s.decided_by || 'individual',
+        features: {
+          veg_frac: feat.veg_frac ?? 0,
+          sat: feat.sat ?? 0,
+          val: feat.val ?? 0,
+          hue: feat.hue ?? 0,
+          rect: feat.rect ?? 0,
+          solidity: feat.solidity ?? 0,
+          area_m2: feat.area_m2 ?? 0,
+          ground_likeness: feat.ground_likeness ?? 0,
+        },
+        exported_at: exportedAt,
+      }
+    })
+    .filter(Boolean)
+  return JSON.stringify(records, null, 2)
+}
+
 

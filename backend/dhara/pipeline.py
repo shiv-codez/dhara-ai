@@ -53,6 +53,38 @@ def _count(issues: list[Issue]) -> dict:
     return d
 
 
+def compute_data_fingerprint(parcels_gdf: gpd.GeoDataFrame, version: str = "dhara:v1") -> str:
+    """Deterministic SHA-256 hash of canonical parcel IDs, rounded geometry coordinates, and pipeline version."""
+    import hashlib
+    import json
+    import shapely.geometry
+
+    def _round_coords(coords):
+        if isinstance(coords, (int, float)):
+            return round(float(coords), 6)
+        return [_round_coords(c) for c in coords]
+
+    items = []
+    if parcels_gdf is not None and len(parcels_gdf):
+        sorted_gdf = parcels_gdf.sort_values("parcel_id")
+        for _, row in sorted_gdf.iterrows():
+            pid = str(row.get("parcel_id", ""))
+            geom = row.geometry
+            if geom is None or geom.is_empty:
+                coords = []
+            else:
+                m = shapely.geometry.mapping(geom)
+                coords = _round_coords(m.get("coordinates", []))
+            items.append({"parcel_id": pid, "coordinates": coords})
+
+    payload = {
+        "version": version,
+        "parcels": items,
+    }
+    dumped = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(dumped.encode("utf-8")).hexdigest()
+
+
 def run_scene(scene: Scene, params: Params | None = None, segmenter=None, out_dir: Path | None = None,
               web_dir: Path | None = None, classifier=None, classifier_threshold: float = 0.5, log=print) -> dict:
     p = params or Params()
@@ -286,6 +318,7 @@ def run_scene(scene: Scene, params: Params | None = None, segmenter=None, out_di
         "bounds": wgs84_bounds(tif), "size_px": [w, h], "gsd_m": round(gsd, 4), "crs": str(crs),
         "georef_source": tags.get("GEOREF_SOURCE", "embedded"),
         "area_ha": round(w * h * gsd * gsd / 10000, 3),
+        "data_fingerprint": compute_data_fingerprint(parcels_fixed),
         "model": model_name,
         "classifier": classifier_meta,
         "counts": {"sam_instances": len(insts), "buildings": len(buildings), "parcels": len(parcels_fixed),

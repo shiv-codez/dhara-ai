@@ -20,7 +20,9 @@
  "crs": "EPSG:32643",
  "georef_source": "assumed_demo",
  "area_ha": 0.784,
+ "data_fingerprint": "9fcf7d7dc7e78762b58c3f9f97bdd883ef0f36ebbdfdda5a052b305725b67ed9",
  "model": "MobileSAM (vit_t) automatic mask generator",
+ "classifier": null,
  "counts": {
   "sam_instances": 318,
   "buildings": 75,
@@ -62,9 +64,9 @@
   "classification_s": 0.1,
   "vectorisation_s": 0.4,
   "parcel_inference_s": 0.1,
-  "topology_s": 0.1
+  "topology_s": 0.2
  },
- "total_s": 1.4,
+ "total_s": 1.7,
  "params": {
   "points_per_side": 40,
   "points_per_batch": 32,

@@ -1,38 +1,3 @@
-"""Command line: run the pipeline on the demo scenes and publish outputs to the web app.
-
-    python -m dhara.cli run village_tiled town_dense --publish ../frontend/public/data
-"""
-from __future__ import annotations
-
-import argparse
-import json
-import shutil
-import warnings
-from pathlib import Path
-
-from .config import DATA_OUT, SCENES, Params
-
-PUBLISH_FILES = ["manifest.json", "ortho.jpg", "masks.png", "segments.png", "parcels.geojson",
-                 "parcels_before_fix.geojson", "buildings.geojson", "buildings_raw.geojson",
-                 "roads.geojson", "vegetation.geojson", "open_ground.geojson", "issues.geojson",
-                 "issues_before_fix.geojson"]
-
-
-def publish(scene_ids: list[str], dest: Path) -> None:
-    index = []
-    for sid in scene_ids:
-        src = DATA_OUT / sid / "web"
-        out = dest / sid
-        out.mkdir(parents=True, exist_ok=True)
-        for f in PUBLISH_FILES + [f"{sid}_dhara_candidates.gpkg"]:
-            if (src / f).exists():
-                shutil.copy2(src / f, out / f)
-        man = json.loads((src / "manifest.json").read_text())
-        index.append({"id": sid, "title": man["title"], "description": man["description"]})
-    (dest / "index.json").write_text(json.dumps(index, indent=1))
-    print(f"published {len(index)} scene(s) -> {dest}")
-
-
 """Command line: run the pipeline on the demo scenes and publish outputs to the web app,
 or train a second-stage classifier from officer review labels.
 

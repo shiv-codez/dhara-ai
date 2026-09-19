@@ -4,7 +4,17 @@ import StepRail from './components/StepRail.jsx'
 import RightPanel, { sortQueueFeatures } from './components/RightPanel.jsx'
 import Legend from './components/Legend.jsx'
 import { STEPS, STATUS } from './lib/steps.js'
-import { loadIndex, loadScene, loadSaved, saveSaved, download, exportParcels, exportLabels } from './lib/data.js'
+import {
+  loadIndex,
+  loadScene,
+  loadSaved,
+  saveSaved,
+  backupSaved,
+  download,
+  exportParcels,
+  exportLabels,
+  exportLabelsFromBackup,
+} from './lib/data.js'
 import { overlapsFor, resolveOverlaps, areaM2, boundsOf } from './lib/geo.js'
 
 const STEP_MS = 2600
@@ -126,6 +136,9 @@ export default function App() {
   const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false)
   const [bulkUndoState, setBulkUndoState] = useState(null)
 
+  // Invalidation & Data Fingerprint Banner
+  const [invalidationBanner, setInvalidationBanner] = useState(null)
+
   const timers = useRef([])
   const stageRef = useRef(null)
 
@@ -138,18 +151,43 @@ export default function App() {
     if (!sceneId) return
     let live = true
     setScene(null)
+    setInvalidationBanner(null)
     loadScene(sceneId)
       .then((s) => {
         if (!live) return
         const saved = loadSaved(sceneId)
-        const edits = saved.edits || {}
+        const manifestFp = s.manifest?.data_fingerprint
+
+        const hasSavedState =
+          (saved.statuses && Object.keys(saved.statuses).length > 0) ||
+          (saved.audit && saved.audit.length > 0) ||
+          (saved.edits && Object.keys(saved.edits).length > 0)
+
+        let activeSaved = saved
+        if (hasSavedState && saved.fingerprint && manifestFp && saved.fingerprint !== manifestFp) {
+          const nonDraftCount = Object.values(saved.statuses || {}).filter(
+            (st) => st && st.status && st.status !== 'draft'
+          ).length
+          const decisionCount = nonDraftCount || Object.keys(saved.statuses || {}).length
+
+          backupSaved(sceneId, saved)
+
+          setInvalidationBanner({
+            sceneId,
+            count: decisionCount,
+            backupData: saved,
+          })
+          activeSaved = {}
+        }
+
+        const edits = activeSaved.edits || {}
         const fc = {
           ...s.data.parcels,
           features: s.data.parcels.features.map((f) => (edits[f.properties.parcel_id] ? { ...f, geometry: edits[f.properties.parcel_id] } : f)),
         }
         setParcels(fc)
-        setStatuses(saved.statuses || {})
-        setAudit(saved.audit || [])
+        setStatuses(activeSaved.statuses || {})
+        setAudit(activeSaved.audit || [])
         setSelectedId(null); setEditingId(null); setOverlaps([])
         setBulkUndoState(null)
         setRebuildKey((k) => k + 1)
@@ -169,7 +207,28 @@ export default function App() {
     parcels.features.forEach((f) => {
       if (JSON.stringify(f.geometry) !== orig.get(f.properties.parcel_id)) edits[f.properties.parcel_id] = f.geometry
     })
-    saveSaved(scene.id, { statuses, audit, edits })
+    const featureSnapshots = {}
+    scene.data.parcels.features.forEach((f) => {
+      const p = f.properties
+      featureSnapshots[p.parcel_id] = {
+        building_id: p.building_id || '',
+        veg_frac: p.veg_frac ?? 0,
+        sat: p.sat ?? 0,
+        val: p.val ?? 0,
+        hue: p.hue ?? 0,
+        rect: p.rect ?? 0,
+        solidity: p.solidity ?? 0,
+        area_m2: p.area_m2 ?? 0,
+        ground_likeness: p.ground_likeness ?? 0,
+      }
+    })
+    saveSaved(scene.id, {
+      fingerprint: scene.manifest?.data_fingerprint,
+      statuses,
+      audit,
+      edits,
+      featureSnapshots,
+    })
   }, [scene, parcels, statuses, audit])
 
   // ------------------------------------------------------------------ steps + walkthrough
@@ -651,6 +710,44 @@ export default function App() {
         />
 
         {scanNonce > 0 && <div key={scanNonce} className="scan" aria-hidden="true" />}
+
+        {/* Invalidation Banner when map data was regenerated */}
+        {invalidationBanner && (
+          <div className="invalidation-banner" role="alert">
+            <div className="invalidation-banner-content">
+              <span className="banner-icon" aria-hidden="true">⚠️</span>
+              <span className="banner-text">
+                The map data for this scene was regenerated, so {invalidationBanner.count} earlier {invalidationBanner.count === 1 ? 'decision was' : 'decisions were'} set aside.
+              </span>
+              <button
+                type="button"
+                className="btn btn-sm banner-action-btn"
+                onClick={() => {
+                  download(
+                    `${invalidationBanner.sceneId}_old_review_labels.json`,
+                    exportLabelsFromBackup(
+                      invalidationBanner.sceneId,
+                      invalidationBanner.backupData,
+                      scene?.data?.parcels
+                    ),
+                    'application/json'
+                  )
+                }}
+              >
+                Export old review labels
+              </button>
+            </div>
+            <button
+              type="button"
+              className="banner-close-btn"
+              onClick={() => setInvalidationBanner(null)}
+              aria-label="Dismiss banner"
+              title="Dismiss notification"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Compare Swipe Slider Overlay */}
         {compareActive && (
