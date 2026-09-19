@@ -80,8 +80,8 @@ function CompareSliderOverlay({ pos, onChange, stageRef }) {
           </svg>
         </div>
       </div>
-      <span className="compare-badge left">Raw Ortho</span>
-      <span className="compare-badge right">Detections &amp; Parcels</span>
+      <span className="compare-badge left">Raw image</span>
+      <span className="compare-badge right">Dhara.ai detections</span>
     </div>
   )
 }

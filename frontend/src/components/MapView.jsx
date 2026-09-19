@@ -52,6 +52,13 @@ export function getParcelStyle(f, mode, statuses, selectedId, isHovered, fillEna
   }
 }
 
+export function computeCoverClipInset(containerRect, comparePos, imgRect) {
+  if (!containerRect || !imgRect) return 0
+  const dividerX = containerRect.left + (containerRect.width * (comparePos / 100))
+  const dividerInImgX = dividerX - imgRect.left
+  return Math.max(0, imgRect.width - dividerInImgX)
+}
+
 const issueColor = { error: '#D62839', warning: '#E8A317', info: '#4C6EF5' }
 
 export default function MapView({
@@ -81,6 +88,7 @@ export default function MapView({
   const parcelLayers = useRef({}) // parcel_id -> polygon layer
   const overlapLayer = useRef(null)
   const hoverCtrl = useRef(null)
+  const rawCoverLayer = useRef(null)
 
   const cb = useRef({})
   cb.current = {
@@ -93,6 +101,8 @@ export default function MapView({
     statuses,
     fillEnabled,
     fillOpacity,
+    compareActive,
+    comparePos,
   }
 
   // ---------------------------------------------------------------- map + static panes per scene
@@ -317,17 +327,38 @@ export default function MapView({
         const id = f.properties.parcel_id
         parcelLayers.current[id] = lyr
 
-        // Click selection
+        const isCoveredByCompare = (e) => {
+          if (!cb.current.compareActive) return false
+          const m = map.current
+          if (!m || !el.current) return false
+          const containerRect = el.current.getBoundingClientRect()
+          const clientX = e.originalEvent
+            ? e.originalEvent.clientX
+            : e.containerPoint
+            ? containerRect.left + e.containerPoint.x
+            : null
+          if (clientX == null) return false
+          const dividerX = containerRect.left + containerRect.width * (cb.current.comparePos / 100)
+          return clientX < dividerX
+        }
+
+        // Click selection (ignored on left covered side of compare slider)
         lyr.on('click', (e) => {
+          if (isCoveredByCompare(e)) return
           L.DomEvent.stopPropagation(e)
           cb.current.onSelect(id)
         })
 
-        // Single shared hover controller handlers (no per-polygon tooltip binding)
+        // Single shared hover controller handlers (ignored on left covered side of compare slider)
         lyr.on('mouseover', (e) => {
+          if (isCoveredByCompare(e)) return
           hoverCtrl.current?.onMouseOver(e, id, lyr)
         })
         lyr.on('mousemove', (e) => {
+          if (isCoveredByCompare(e)) {
+            hoverCtrl.current?.clear()
+            return
+          }
           hoverCtrl.current?.onMouseMove(e, id, lyr)
         })
         lyr.on('mouseout', (e) => {
@@ -449,22 +480,81 @@ export default function MapView({
     map.current.flyToBounds(b.pad(1.2), { maxZoom: 22, duration: reduceMotion() ? 0 : 0.6 })
   }, [focus])
 
-  // ---------------------------------------------------------------- compare slider clipping
+  // ---------------------------------------------------------------- compare slider via raw cover image
+  const updateCoverClip = useCallback(() => {
+    const m = map.current
+    const lyr = rawCoverLayer.current
+    if (!m || !lyr || !el.current || !compareActive) return
+    const imgEl = lyr.getElement()
+    if (!imgEl) return
+
+    const containerRect = el.current.getBoundingClientRect()
+    const imgRect = imgEl.getBoundingClientRect()
+    const rightPx = computeCoverClipInset(containerRect, comparePos, imgRect)
+
+    imgEl.style.clipPath = `inset(0 ${rightPx}px 0 0)`
+  }, [compareActive, comparePos])
+
   useEffect(() => {
     const m = map.current
-    if (!m) return
-    const overlayPanes = ['segPane', 'maskPane', 'bldPane', 'parcelPane', 'overlapPane', 'issuePane', 'labelPane']
-    overlayPanes.forEach((paneName) => {
-      const p = m.getPane(paneName)
-      if (p) {
-        if (compareActive) {
-          p.style.clipPath = `polygon(${comparePos}% 0, 100% 0, 100% 100%, ${comparePos}% 100%)`
-        } else {
-          p.style.clipPath = ''
+    if (!m || !scene) return
+
+    if (!compareActive) {
+      if (rawCoverLayer.current) {
+        if (m.hasLayer(rawCoverLayer.current)) {
+          m.removeLayer(rawCoverLayer.current)
         }
+        rawCoverLayer.current = null
       }
-    })
-  }, [compareActive, comparePos])
+      const pane = m.getPane('rawCoverPane')
+      if (pane) {
+        pane.parentNode?.removeChild(pane)
+        const panes = m.getPanes?.() || {}
+        delete panes.rawCoverPane
+      }
+      return
+    }
+
+    // Compare is ACTIVE: ensure rawCoverPane exists at zIndex 640
+    let pane = m.getPane('rawCoverPane')
+    if (!pane) {
+      pane = m.createPane('rawCoverPane')
+      pane.style.zIndex = 640
+      pane.style.pointerEvents = 'none'
+    }
+
+    if (!rawCoverLayer.current) {
+      const b = L.latLngBounds(scene.manifest.bounds)
+      const lyr = L.imageOverlay(scene.urls.ortho, b, {
+        pane: 'rawCoverPane',
+        interactive: false,
+      })
+      lyr.addTo(m)
+      rawCoverLayer.current = lyr
+    }
+
+    const onAnim = () => {
+      updateCoverClip()
+    }
+
+    m.on('move moveend zoom zoomend zoomanim resize', onAnim)
+
+    // Run clip calculation on next frame once image element is mounted in DOM
+    const frameId = requestAnimationFrame(updateCoverClip)
+
+    return () => {
+      cancelAnimationFrame(frameId)
+      m.off('move moveend zoom zoomend zoomanim resize', onAnim)
+    }
+  }, [compareActive, scene, updateCoverClip])
+
+  // Also update clip whenever comparePos changes
+  useEffect(() => {
+    if (compareActive) {
+      updateCoverClip()
+      hoverCtrl.current?.clear()
+    }
+  }, [comparePos, compareActive, updateCoverClip])
 
   return <div ref={el} className="map" role="application" aria-label="Parcel map" />
 }
