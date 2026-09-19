@@ -1,0 +1,88 @@
+{
+ "scene": "village_tiled",
+ "title": "Village with tiled roofs",
+ "description": "Low-density village: tiled roofs, tree cover, open ground, paddy edge.",
+ "bounds": [
+  [
+   22.79938542823105,
+   77.09999081311064
+  ],
+  [
+   22.799999999999997,
+   77.10114896370638
+  ]
+ ],
+ "size_px": [
+  590,
+  332
+ ],
+ "gsd_m": 0.2,
+ "crs": "EPSG:32643",
+ "georef_source": "assumed_demo",
+ "area_ha": 0.784,
+ "model": "MobileSAM (vit_t) automatic mask generator",
+ "counts": {
+  "sam_instances": 318,
+  "buildings": 75,
+  "parcels": 75,
+  "road_corridors": 10,
+  "vegetation_patches": 27
+ },
+ "regularisation": {
+  "vertices_raw": 3570,
+  "vertices_regularised": 558,
+  "right_angle_share_simplified_only": 0.135,
+  "right_angle_share_regularised": 0.567,
+  "simplify_tol_m": 0.25,
+  "ortho_angle_tol_deg": 22.0
+ },
+ "topology": {
+  "before_fix": {
+   "tiny_parcel": 5,
+   "building_overlap": 2,
+   "building_straddles": 1,
+   "no_road_access": 14
+  },
+  "after_fix": {
+   "tiny_parcel": 5,
+   "building_overlap": 2,
+   "building_straddles": 1,
+   "no_road_access": 14
+  },
+  "parcels_with_error_before": 2,
+  "parcels_with_error_after": 2
+ },
+ "coverage": {
+  "building_pct": 42.7,
+  "road_pct": 21.8,
+  "vegetation_pct": 22.1
+ },
+ "timings_s": {
+  "segmentation_s": 0.0,
+  "classification_s": 0.1,
+  "vectorisation_s": 0.3,
+  "parcel_inference_s": 0.1,
+  "topology_s": 0.1
+ },
+ "total_s": 0.8,
+ "params": {
+  "points_per_side": 40,
+  "points_per_batch": 32,
+  "pred_iou_thresh": 0.82,
+  "stability_thresh": 0.88,
+  "min_mask_area_m2": 6.0,
+  "tile_size_px": 1600,
+  "tile_overlap_px": 128,
+  "building_min_area_m2": 14.0,
+  "building_max_area_m2": 700.0,
+  "simplify_tol_m": 0.25,
+  "ortho_angle_tol_deg": 22.0,
+  "min_polygon_area_m2": 8.0,
+  "max_setback_m": 6.0,
+  "road_min_width_m": 1.2,
+  "min_parcel_area_m2": 12.0,
+  "sliver_thickness_m": 0.35,
+  "overlap_tol_m2": 0.25
+ },
+ "status_note": "All outputs are candidate geometries (Draft / Unverified) pending officer review and field verification."
+}

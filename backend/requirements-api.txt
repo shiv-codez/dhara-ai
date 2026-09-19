@@ -1,0 +1,7 @@
+# Light server: geometry engine over HTTP (fits Render's free 512 MB instance)
+fastapi>=0.115
+uvicorn[standard]>=0.30
+shapely>=2.1
+geopandas>=1.0
+pyproj>=3.6
+numpy>=1.26

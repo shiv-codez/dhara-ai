@@ -1,0 +1,13 @@
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.egg-info/
+.claude/
+weights/*.pt
+data/processed/*/orthomosaic.tif
+data/processed/*/web/
+data/processed/*/tiles/
+.DS_Store

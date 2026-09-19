@@ -1,0 +1,94 @@
+{
+ "scene": "town_dense",
+ "title": "Dense old-town settlement",
+ "description": "Compact multi-storey settlement, narrow lanes, touching buildings.",
+ "bounds": [
+  [
+   26.911352883368505,
+   75.78729277438698
+  ],
+  [
+   26.9124,
+   75.78831509162647
+  ]
+ ],
+ "size_px": [
+  1260,
+  1442
+ ],
+ "gsd_m": 0.08,
+ "crs": "EPSG:32643",
+ "georef_source": "assumed_demo",
+ "area_ha": 1.163,
+ "model": "MobileSAM (vit_t) automatic mask generator",
+ "counts": {
+  "sam_instances": 658,
+  "buildings": 145,
+  "parcels": 145,
+  "road_corridors": 7,
+  "vegetation_patches": 1
+ },
+ "regularisation": {
+  "vertices_raw": 37798,
+  "vertices_regularised": 1169,
+  "right_angle_share_simplified_only": 0.059,
+  "right_angle_share_regularised": 0.485,
+  "simplify_tol_m": 0.25,
+  "ortho_angle_tol_deg": 22.0
+ },
+ "topology": {
+  "before_fix": {
+   "parcel_gap": 1,
+   "tiny_parcel": 14,
+   "sliver_parcel": 2,
+   "building_overlap": 6,
+   "building_on_road": 1,
+   "building_straddles": 2,
+   "no_road_access": 9
+  },
+  "after_fix": {
+   "parcel_gap": 1,
+   "tiny_parcel": 14,
+   "sliver_parcel": 2,
+   "building_overlap": 6,
+   "building_on_road": 1,
+   "building_straddles": 2,
+   "no_road_access": 9
+  },
+  "parcels_with_error_before": 4,
+  "parcels_with_error_after": 4
+ },
+ "coverage": {
+  "building_pct": 56.9,
+  "road_pct": 35.7,
+  "vegetation_pct": 0.1
+ },
+ "timings_s": {
+  "segmentation_s": 0.0,
+  "classification_s": 1.0,
+  "vectorisation_s": 3.4,
+  "parcel_inference_s": 0.4,
+  "topology_s": 0.2
+ },
+ "total_s": 5.9,
+ "params": {
+  "points_per_side": 40,
+  "points_per_batch": 32,
+  "pred_iou_thresh": 0.82,
+  "stability_thresh": 0.88,
+  "min_mask_area_m2": 6.0,
+  "tile_size_px": 1600,
+  "tile_overlap_px": 128,
+  "building_min_area_m2": 14.0,
+  "building_max_area_m2": 700.0,
+  "simplify_tol_m": 0.25,
+  "ortho_angle_tol_deg": 22.0,
+  "min_polygon_area_m2": 8.0,
+  "max_setback_m": 6.0,
+  "road_min_width_m": 1.2,
+  "min_parcel_area_m2": 12.0,
+  "sliver_thickness_m": 0.35,
+  "overlap_tol_m2": 0.25
+ },
+ "status_note": "All outputs are candidate geometries (Draft / Unverified) pending officer review and field verification."
+}

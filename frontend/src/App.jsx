@@ -1,0 +1,216 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import MapView from './components/MapView.jsx'
+import StepRail from './components/StepRail.jsx'
+import RightPanel from './components/RightPanel.jsx'
+import { STEPS, STATUS } from './lib/steps.js'
+import { loadIndex, loadScene, loadSaved, saveSaved, download, exportParcels } from './lib/data.js'
+import { overlapsFor, resolveOverlaps, areaM2, boundsOf } from './lib/geo.js'
+
+const STEP_MS = 2600
+
+export default function App() {
+  const [index, setIndex] = useState([])
+  const [sceneId, setSceneId] = useState(null)
+  const [scene, setScene] = useState(null)
+  const [error, setError] = useState(null)
+
+  const [stepIdx, setStepIdx] = useState(0)
+  const [vis, setVis] = useState(STEPS[0].vis)
+  const [regMode, setRegMode] = useState('clean')
+  const [fixMode, setFixMode] = useState('after')
+  const [playing, setPlaying] = useState(false)
+  const [scanNonce, setScanNonce] = useState(0)
+
+  const [parcels, setParcels] = useState(null)
+  const [rebuildKey, setRebuildKey] = useState(0)
+  const [statuses, setStatuses] = useState({})
+  const [audit, setAudit] = useState([])
+  const [selectedId, setSelectedId] = useState(null)
+  const [editingId, setEditingId] = useState(null)
+  const [overlaps, setOverlaps] = useState([])
+  const [tab, setTab] = useState('parcel')
+  const [focus, setFocus] = useState(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const timers = useRef([])
+
+  // ------------------------------------------------------------------ load scenes
+  useEffect(() => {
+    loadIndex().then((idx) => { setIndex(idx); setSceneId(idx[0]?.id) }).catch((e) => setError(e.message))
+  }, [])
+
+  useEffect(() => {
+    if (!sceneId) return
+    let live = true
+    setScene(null)
+    loadScene(sceneId)
+      .then((s) => {
+        if (!live) return
+        const saved = loadSaved(sceneId)
+        const edits = saved.edits || {}
+        const fc = {
+          ...s.data.parcels,
+          features: s.data.parcels.features.map((f) => (edits[f.properties.parcel_id] ? { ...f, geometry: edits[f.properties.parcel_id] } : f)),
+        }
+        setParcels(fc)
+        setStatuses(saved.statuses || {})
+        setAudit(saved.audit || [])
+        setSelectedId(null); setEditingId(null); setOverlaps([])
+        setRebuildKey((k) => k + 1)
+        setScene(s)
+        goStep(0, false)
+      })
+      .catch(() => live && setError('Scene data could not be loaded. Run the pipeline and publish its outputs (see README).'))
+    return () => { live = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sceneId])
+
+  // persist review work
+  useEffect(() => {
+    if (!scene || !parcels) return
+    const edits = {}
+    const orig = new Map(scene.data.parcels.features.map((f) => [f.properties.parcel_id, JSON.stringify(f.geometry)]))
+    parcels.features.forEach((f) => {
+      if (JSON.stringify(f.geometry) !== orig.get(f.properties.parcel_id)) edits[f.properties.parcel_id] = f.geometry
+    })
+    saveSaved(scene.id, { statuses, audit, edits })
+  }, [scene, parcels, statuses, audit])
+
+  // ------------------------------------------------------------------ steps + walkthrough
+  const clearTimers = () => { timers.current.forEach(clearTimeout); timers.current = [] }
+  const goStep = useCallback((i, fromPlay) => {
+    const s = STEPS[i]
+    setStepIdx(i)
+    setVis(s.vis)
+    setRegMode(s.regToggle ? 'raw' : 'clean')
+    if (s.id === 'sam') setScanNonce((n) => n + 1)
+    if (s.regToggle && fromPlay) timers.current.push(setTimeout(() => setRegMode('clean'), 1500))
+    if (s.id === 'review') setTab('parcel')
+    if (s.id === 'validate') setTab('checks')
+    if (s.id === 'parcels') setTab('parcel')
+  }, [])
+
+  const stop = () => { clearTimers(); setPlaying(false) }
+  const play = () => {
+    clearTimers(); setPlaying(true); setSelectedId(null); setEditingId(null)
+    STEPS.forEach((_, i) => {
+      timers.current.push(setTimeout(() => { goStep(i, true); if (i === STEPS.length - 1) setPlaying(false) }, i * STEP_MS))
+    })
+  }
+  useEffect(() => clearTimers, [])
+  const manualStep = (i) => { stop(); goStep(i, false) }
+
+  // ------------------------------------------------------------------ review actions
+  const log = (parcel, text) => setAudit((a) => [...a, { t: new Date().toISOString(), parcel, text }])
+  const setStatus = (id, status, note) => {
+    setStatuses((s) => ({ ...s, [id]: { status, note: note || s[id]?.note || '' } }))
+    log(id, `${STATUS[status].label}${note ? ` - ${note}` : ''}`)
+  }
+  const select = (id) => {
+    if (editingId && id !== editingId) finishEdit()
+    setSelectedId(id)
+    if (id) setTab('parcel')
+  }
+
+  const onGeometryEdit = (id, geometry) => {
+    setParcels((fc) => {
+      const features = fc.features.map((f) => (f.properties.parcel_id === id ? { ...f, geometry } : f))
+      const edited = features.find((f) => f.properties.parcel_id === id)
+      setOverlaps(overlapsFor(edited, features))
+      return { ...fc, features }
+    })
+  }
+  const startEdit = () => { setEditingId(selectedId); setOverlaps([]) }
+  const finishEdit = () => {
+    if (!editingId) return
+    const f = parcels.features.find((x) => x.properties.parcel_id === editingId)
+    const orig = scene.data.parcels.features.find((x) => x.properties.parcel_id === editingId)
+    log(editingId, `Boundary edited (${areaM2(orig).toFixed(1)} to ${areaM2(f).toFixed(1)} m²)${overlaps.length ? ', overlap left unresolved' : ''}`)
+    setEditingId(null); setOverlaps([])
+  }
+  const resolve = () => {
+    const f = parcels.features.find((x) => x.properties.parcel_id === editingId)
+    const geometry = resolveOverlaps(f, overlaps, parcels.features)
+    setParcels((fc) => ({ ...fc, features: fc.features.map((x) => (x.properties.parcel_id === editingId ? { ...x, geometry } : x)) }))
+    log(editingId, `Overlap with ${overlaps.map((o) => o.with.slice(-4)).join(', ')} resolved`)
+    setOverlaps([]); setRebuildKey((k) => k + 1)
+  }
+  const resetEdits = () => {
+    if (!scene) return
+    setParcels(scene.data.parcels); setStatuses({}); setAudit([]); setEditingId(null); setOverlaps([]); setSelectedId(null)
+    setRebuildKey((k) => k + 1)
+  }
+
+  // ------------------------------------------------------------------ derived
+  const parcel = useMemo(() => parcels?.features.find((f) => f.properties.parcel_id === selectedId) || null, [parcels, selectedId])
+  const issues = useMemo(() => (scene ? (fixMode === 'before' ? scene.data.issues_before_fix : scene.data.issues).features : []), [scene, fixMode])
+  const reviewed = Object.values(statuses).filter((s) => s.status !== 'draft').length
+  const approved = Object.values(statuses).filter((s) => s.status === 'approved').length
+  const styleMode = STEPS[stepIdx].styleMode || 'landuse'
+
+  if (error) return <div className="boot"><h1>Dhara.ai</h1><p>{error}</p></div>
+  if (!scene || !parcels) return <div className="boot"><h1>Dhara.ai</h1><p>Loading scene…</p></div>
+
+  const m = scene.manifest
+  return (
+    <div className="app">
+      <header className="top">
+        <div className="brand">
+          <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#12233F" /><path d="M7 9h11l7 5v9H7z" fill="none" stroke="#F2F5F9" strokeWidth="2" strokeLinejoin="round" /><path d="M7 16h18M16 9v14" stroke="#E2566B" strokeWidth="2" /></svg>
+          <div><h1>Dhara.ai</h1><p>Drone imagery to candidate parcel maps</p></div>
+        </div>
+        <label className="scene-pick">
+          <span className="sr">Scene</span>
+          <select value={sceneId} onChange={(e) => { stop(); setSceneId(e.target.value) }}>
+            {index.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
+          </select>
+        </label>
+        <div className="top-right">
+          {m.georef_source === 'assumed_demo' && <span className="chip" title="Demo image without survey metadata">Assumed georeference</span>}
+          <span className="chip draft">All parcels: draft, pending officer review</span>
+          <div className="menu">
+            <button className="btn" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}>Export</button>
+            {menuOpen && (
+              <div className="menu-list" role="menu" onMouseLeave={() => setMenuOpen(false)}>
+                <button role="menuitem" onClick={() => { download(`${scene.id}_approved.geojson`, exportParcels(parcels, statuses, 'approved')); setMenuOpen(false) }}>Approved parcels (GeoJSON)</button>
+                <button role="menuitem" onClick={() => { download(`${scene.id}_dhara_candidates.geojson`, exportParcels(parcels, statuses)); setMenuOpen(false) }}>All candidate parcels (GeoJSON)</button>
+                <a role="menuitem" href={scene.urls.gpkg} download onClick={() => setMenuOpen(false)}>GeoPackage for QGIS / ArcGIS</a>
+                <button role="menuitem" onClick={() => { download(`${scene.id}_audit.json`, JSON.stringify(audit, null, 1), 'application/json'); setMenuOpen(false) }}>Review audit log (JSON)</button>
+                <button role="menuitem" className="danger" onClick={() => { resetEdits(); setMenuOpen(false) }}>Discard my edits and decisions</button>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      <StepRail
+        stepIdx={stepIdx} onStep={manualStep} playing={playing} onPlay={play} onStop={stop}
+        vis={vis} onToggleLayer={(k) => setVis((v) => ({ ...v, [k]: !v[k] }))}
+        regMode={regMode} onRegMode={setRegMode} fixMode={fixMode} onFixMode={setFixMode} manifest={m}
+      />
+
+      <main className="stage">
+        <MapView
+          scene={scene} vis={vis} regMode={regMode} fixMode={fixMode} styleMode={styleMode}
+          parcels={parcels} rebuildKey={rebuildKey} statuses={statuses} selectedId={selectedId} onSelect={select}
+          editingId={editingId} onGeometryEdit={onGeometryEdit} overlaps={overlaps} focus={focus}
+        />
+        {scanNonce > 0 && <div key={scanNonce} className="scan" aria-hidden="true" />}
+        <div className="stage-tag"><b>{STEPS[stepIdx].title}</b><span>{stepIdx + 1} of {STEPS.length}</span></div>
+        {styleMode === 'status' && (
+          <ul className="legend" aria-label="Status colours">
+            {Object.entries(STATUS).map(([k, v]) => <li key={k}><i style={{ background: v.color }} />{v.label}</li>)}
+          </ul>
+        )}
+      </main>
+
+      <RightPanel
+        tab={tab} onTab={setTab} manifest={m}
+        parcel={parcel} statuses={statuses} onStatus={setStatus} audit={audit}
+        issues={issues} fixMode={fixMode} onFocus={(b) => setFocus({ bounds: b, nonce: Date.now() })}
+        editing={!!editingId} onEditStart={startEdit} onEditDone={finishEdit}
+        overlaps={overlaps} onResolve={resolve}
+        reviewed={reviewed} approved={approved} total={parcels.features.length}
+      />
+    </div>
+  )
+}
