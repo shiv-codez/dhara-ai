@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef, useLayoutEffect } from 'react'
+import { useMemo, useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { STATUS, ISSUE_LABEL } from '../lib/steps.js'
 import { areaM2, boundsOf } from '../lib/geo.js'
 
@@ -82,11 +82,11 @@ function QueueRow({ feature, isSelected, statusObj, onSelect, onFocus }) {
       <div className="queue-item-main">
         <div className="queue-item-title">
           <span className="queue-item-id">Plot {shortId}</span>
-          <span className={`prio ${prio.toLowerCase()}`}>{prio}</span>
+          <span className={`queue-prio-tag ${prio.toLowerCase()}`}>{prio}</span>
         </div>
         <div className="queue-item-meta">
           <span>{fmt(area, 0)} m²</span>
-          <span>·</span>
+          <span className="dot-sep">·</span>
           <span>{p.landuse || 'Built-up'}</span>
         </div>
       </div>
@@ -94,6 +94,55 @@ function QueueRow({ feature, isSelected, statusObj, onSelect, onFocus }) {
         <span className="badge-bulk" title="Approved in bulk">bulk</span>
       )}
     </button>
+  )
+}
+
+/* ------------------------------------------------------------------------------------- shortcuts footer */
+function ShortcutsFooter() {
+  const [open, setOpen] = useState(() => {
+    try {
+      return localStorage.getItem('dhara:v1:shortcuts-open') === 'true'
+    } catch {
+      return false
+    }
+  })
+
+  const toggle = () => {
+    setOpen((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem('dhara:v1:shortcuts-open', String(next))
+      } catch {}
+      return next
+    })
+  }
+
+  return (
+    <footer className="shortcuts-footer" aria-label="Keyboard shortcuts guide">
+      <button
+        type="button"
+        className="shortcuts-toggle-btn"
+        onClick={toggle}
+        aria-expanded={open}
+      >
+        <span className="shortcuts-toggle-left">
+          <kbd className="key-cap">?</kbd>
+          <span className="shortcuts-heading">Keyboard shortcuts</span>
+        </span>
+        <span className="shortcuts-toggle-arrow">{open ? '▾' : '▸'}</span>
+      </button>
+
+      {open && (
+        <div className="shortcuts-grid">
+          <div className="shortcut-cell"><kbd className="key-cap">A</kbd> <span>approve</span></div>
+          <div className="shortcut-cell"><kbd className="key-cap">F</kbd> <span>field check</span></div>
+          <div className="shortcut-cell"><kbd className="key-cap">R</kbd> <span>reject</span></div>
+          <div className="shortcut-cell"><kbd className="key-cap">N</kbd> <span>next plot</span></div>
+          <div className="shortcut-cell"><kbd className="key-cap">E</kbd> <span>edit boundary</span></div>
+          <div className="shortcut-cell"><kbd className="key-cap">Esc</kbd> <span>deselect</span></div>
+        </div>
+      )}
+    </footer>
   )
 }
 
@@ -120,7 +169,6 @@ function ParcelTab({
   onFocus,
 }) {
   const [note, setNote] = useState('')
-  const queueListRef = useRef(null)
   const scrollPosRef = useRef(0)
 
   const sortedQueue = useMemo(() => (parcels ? sortQueueFeatures(parcels.features) : []), [parcels])
@@ -137,14 +185,21 @@ function ParcelTab({
     }).length
   }, [sortedQueue, statuses])
 
-  // Preserve scroll position when statuses or selection changes
-  const handleQueueScroll = (e) => {
-    scrollPosRef.current = e.target.scrollTop
-  }
+  // Preserve single side-body scroll position across decisions and selections
+  useEffect(() => {
+    const el = document.querySelector('.side-body')
+    if (!el) return
+    const onScroll = () => {
+      scrollPosRef.current = el.scrollTop
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [])
 
   useLayoutEffect(() => {
-    if (queueListRef.current) {
-      queueListRef.current.scrollTop = scrollPosRef.current
+    const el = document.querySelector('.side-body')
+    if (el) {
+      el.scrollTop = scrollPosRef.current
     }
   }, [statuses, parcel])
 
@@ -177,36 +232,7 @@ function ParcelTab({
         </div>
       )}
 
-      {/* Review Queue Header & Controls */}
-      <div className="queue-header">
-        <div className="queue-title-row">
-          <div>
-            <h3>Review Queue</h3>
-            <p className="fine">{unreviewedCount} of {total} unreviewed</p>
-          </div>
-          <div className="queue-actions">
-            <button
-              type="button"
-              className="btn btn-sm next-btn"
-              onClick={onNextInQueue}
-              title="Jump to next unreviewed parcel (N)"
-            >
-              Next <kbd>N</kbd>
-            </button>
-            <button
-              type="button"
-              className="btn btn-sm bulk-btn"
-              onClick={onBulkApproveOpen}
-              disabled={lowDraftCount === 0}
-              title="Bulk approve all Low priority draft parcels"
-            >
-              Approve Low ({lowDraftCount})
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Selected Parcel Inspector */}
+      {/* Selected Parcel Inspector OR 1-line hint */}
       {parcel ? (
         <div className="parcel-inspector">
           <header className="parcel-head">
@@ -314,24 +340,41 @@ function ParcelTab({
           )}
         </div>
       ) : (
-        <div className="empty-parcel-inspector">
+        <div className="empty-parcel-hint">
           <p className="lead">Select a parcel on the map.</p>
-          <p className="fine">
-            Click any plot on the map or pick from the review queue below to inspect its land-use evidence, review priority, and record officer decisions.
-          </p>
         </div>
       )}
 
-      {/* Interactive Review Queue List */}
-      <div className="queue-list-section">
-        <h4 className="queue-subhead">
-          <span>All Plots ({sortedQueue.length})</span>
-          <span className="fine">Sorted by priority & area</span>
-        </h4>
+      {/* Review Queue Section */}
+      <div className="queue-section">
+        <div className="queue-head">
+          <div>
+            <h3>Review Queue</h3>
+            <p className="fine">{unreviewedCount} of {total} unreviewed</p>
+          </div>
+          <div className="queue-actions">
+            <button
+              type="button"
+              className="btn btn-sm next-btn"
+              onClick={onNextInQueue}
+              title="Jump to next unreviewed parcel (N)"
+            >
+              Next <kbd>N</kbd>
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm bulk-btn"
+              onClick={onBulkApproveOpen}
+              disabled={lowDraftCount === 0}
+              title="Bulk approve all Low priority draft parcels"
+            >
+              Approve Low ({lowDraftCount})
+            </button>
+          </div>
+        </div>
+
         <div
-          ref={queueListRef}
           className="queue-list"
-          onScroll={handleQueueScroll}
           tabIndex={0}
           role="region"
           aria-label="Parcel review queue"
@@ -352,18 +395,8 @@ function ParcelTab({
         </div>
       </div>
 
-      {/* Keyboard Shortcut Hints Footer */}
-      <div className="shortcut-hints" aria-label="Keyboard shortcuts guide">
-        <div className="shortcut-title">Keyboard shortcuts</div>
-        <div className="shortcut-grid">
-          <div><kbd>A</kbd> approve</div>
-          <div><kbd>F</kbd> field check</div>
-          <div><kbd>R</kbd> reject</div>
-          <div><kbd>N</kbd> next plot</div>
-          <div><kbd>E</kbd> edit boundary</div>
-          <div><kbd>Esc</kbd> deselect</div>
-        </div>
-      </div>
+      {/* Collapsible Keyboard Shortcuts Footer */}
+      <ShortcutsFooter />
     </div>
   )
 }
