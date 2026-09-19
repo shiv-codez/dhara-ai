@@ -325,7 +325,14 @@ button, select, textarea { font: inherit; color: inherit; }
   z-index: 10;
 }
 
+.leaflet-tooltip-pane {
+  pointer-events: none !important;
+}
+.leaflet-tooltip,
 .dhara-tooltip {
+  pointer-events: none !important;
+  transition: none !important;
+  animation: none !important;
   background: #ffffff !important;
   border: 1px solid var(--line) !important;
   border-radius: 6px !important;
@@ -333,6 +340,7 @@ button, select, textarea { font: inherit; color: inherit; }
   padding: 8px 10px !important;
   color: var(--ink) !important;
   font-family: var(--font) !important;
+  user-select: none;
 }
 .dhara-tooltip::before {
   border-top-color: #ffffff !important;

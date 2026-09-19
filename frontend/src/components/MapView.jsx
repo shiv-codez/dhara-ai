@@ -1,17 +1,18 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import '@geoman-io/leaflet-geoman-free'
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css'
 import pointOnFeature from '@turf/point-on-feature'
 import { LANDUSE_TINT, STATUS, ISSUE_LABEL } from '../lib/steps.js'
+import { createHoverController, getParcelTooltipHtml } from '../lib/hoverController.js'
 
 const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 
-function getParcelStyle(f, mode, statuses, selectedId, hoveredId, fillEnabled, fillOpacity) {
+export function getParcelStyle(f, mode, statuses, selectedId, isHovered, fillEnabled, fillOpacity) {
   const id = f.properties.parcel_id
   const sel = id === selectedId
-  const hov = id === hoveredId
+  const hov = isHovered && !sel
   const isStatus = mode === 'status'
 
   let fillColor = 'transparent'
@@ -77,10 +78,20 @@ export default function MapView({
   const L_ = useRef({}) // all leaflet layers by name
   const parcelLayers = useRef({}) // parcel_id -> polygon layer
   const overlapLayer = useRef(null)
-  const [hoveredId, setHoveredId] = useState(null)
+  const hoverCtrl = useRef(null)
 
   const cb = useRef({})
-  cb.current = { onSelect, onGeometryEdit, editingId, parcels, selectedId }
+  cb.current = {
+    onSelect,
+    onGeometryEdit,
+    editingId,
+    parcels,
+    selectedId,
+    styleMode,
+    statuses,
+    fillEnabled,
+    fillOpacity,
+  }
 
   // ---------------------------------------------------------------- map + static panes per scene
   useEffect(() => {
@@ -106,6 +117,21 @@ export default function MapView({
     m.createPane('issuePane').style.zIndex = 460
     m.createPane('labelPane').style.zIndex = 470
 
+    hoverCtrl.current = createHoverController({
+      map: m,
+      getStyle: (feature, isHovered) =>
+        getParcelStyle(
+          feature,
+          cb.current.styleMode,
+          cb.current.statuses,
+          cb.current.selectedId,
+          isHovered,
+          cb.current.fillEnabled,
+          cb.current.fillOpacity
+        ),
+      getTooltipContent: getParcelTooltipHtml,
+    })
+
     m.on('click', () => {
       if (!cb.current.editingId) cb.current.onSelect(null)
     })
@@ -123,6 +149,10 @@ export default function MapView({
 
     return () => {
       if (ro) ro.disconnect()
+      if (hoverCtrl.current) {
+        hoverCtrl.current.destroy()
+        hoverCtrl.current = null
+      }
       m.remove()
       map.current = null
     }
@@ -266,14 +296,23 @@ export default function MapView({
     if (!m || !scene) return
     ;['parcels', 'labels'].forEach((k) => L_.current[k] && m.removeLayer(L_.current[k]))
     parcelLayers.current = {}
+    hoverCtrl.current?.clear()
 
     const labels = L.layerGroup()
     const layer = L.geoJSON(cb.current.parcels, {
       pane: 'parcelPane',
-      style: (f) => getParcelStyle(f, styleMode, statuses, selectedId, null, fillEnabled, fillOpacity),
+      style: (f) =>
+        getParcelStyle(
+          f,
+          styleMode,
+          statuses,
+          selectedId,
+          hoverCtrl.current?.getHoveredId() === f.properties.parcel_id,
+          fillEnabled,
+          fillOpacity
+        ),
       onEachFeature: (f, lyr) => {
         const id = f.properties.parcel_id
-        const p = f.properties
         parcelLayers.current[id] = lyr
 
         // Click selection
@@ -282,40 +321,21 @@ export default function MapView({
           cb.current.onSelect(id)
         })
 
-        // Hover highlight
-        lyr.on('mouseover', () => {
-          setHoveredId(id)
+        // Single shared hover controller handlers (no per-polygon tooltip binding)
+        lyr.on('mouseover', (e) => {
+          hoverCtrl.current?.onMouseOver(e, id, lyr)
         })
-        lyr.on('mouseout', () => {
-          setHoveredId(null)
+        lyr.on('mousemove', (e) => {
+          hoverCtrl.current?.onMouseMove(e, id, lyr)
+        })
+        lyr.on('mouseout', (e) => {
+          hoverCtrl.current?.onMouseOut(e, id, lyr)
         })
 
         // Geoman geometry editing
         const save = () => cb.current.onGeometryEdit(id, lyr.toGeoJSON().geometry)
         lyr.on('pm:edit', save)
         lyr.on('pm:markerdragend', save)
-
-        // Rich tooltip on hover
-        const shortId = id.slice(-4)
-        const area = Number(p.area_m2 || 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })
-        const prio = p.review_priority || 'Low'
-        const tooltipHtml = `
-          <div class="parcel-tip">
-            <div class="tip-top">
-              <strong>Plot ${shortId}</strong>
-              <span class="tip-prio prio ${prio.toLowerCase()}">${prio}</span>
-            </div>
-            <div class="tip-row"><span>Area:</span> <b>${area} m²</b></div>
-            <div class="tip-row"><span>Land use:</span> <b>${p.landuse || 'Unknown'}</b></div>
-            ${p.review_reasons ? `<div class="tip-reason">${p.review_reasons}</div>` : ''}
-          </div>
-        `
-        lyr.bindTooltip(tooltipHtml, {
-          sticky: true,
-          direction: 'top',
-          offset: [0, -6],
-          className: 'dhara-tooltip',
-        })
       },
     })
 
@@ -329,16 +349,20 @@ export default function MapView({
 
   // ---------------------------------------------------------------- parcel dynamic styling on state change
   useEffect(() => {
+    hoverCtrl.current?.updateCallbacks({
+      getStyle: (feature, isHovered) =>
+        getParcelStyle(feature, styleMode, statuses, selectedId, isHovered, fillEnabled, fillOpacity),
+    })
+
     Object.entries(parcelLayers.current).forEach(([id, lyr]) => {
-      lyr.setStyle(getParcelStyle(lyr.feature, styleMode, statuses, selectedId, hoveredId, fillEnabled, fillOpacity))
+      const isHovered = hoverCtrl.current?.getHoveredId() === id
+      lyr.setStyle(getParcelStyle(lyr.feature, styleMode, statuses, selectedId, isHovered, fillEnabled, fillOpacity))
     })
     const sel = parcelLayers.current[selectedId]
     if (sel) sel.bringToFront()
-    const hov = parcelLayers.current[hoveredId]
-    if (hov && hoveredId !== selectedId) hov.bringToFront()
 
     updateLabels()
-  }, [styleMode, statuses, selectedId, hoveredId, fillEnabled, fillOpacity, rebuildKey, scene, updateLabels])
+  }, [styleMode, statuses, selectedId, fillEnabled, fillOpacity, rebuildKey, scene, updateLabels])
 
   // ---------------------------------------------------------------- topology flag markers
   useEffect(() => {
