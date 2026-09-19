@@ -6,6 +6,7 @@ import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css'
 import pointOnFeature from '@turf/point-on-feature'
 import { LANDUSE_TINT, STATUS, ISSUE_LABEL } from '../lib/steps.js'
 import { createHoverController, getParcelTooltipHtml } from '../lib/hoverController.js'
+import { escapeHtml } from '../lib/sanitize.js'
 
 const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 
@@ -200,7 +201,7 @@ export default function MapView({
         interactive: false,
         icon: L.divIcon({
           className: 'plot-no selected',
-          html: `<span>${selFeature.properties.parcel_id.slice(-4)}</span>`,
+          html: `<span>${escapeHtml(selFeature.properties.parcel_id.slice(-4))}</span>`,
           iconSize: [0, 0],
         }),
       }).addTo(labelsGroup)
@@ -237,7 +238,7 @@ export default function MapView({
           interactive: false,
           icon: L.divIcon({
             className: 'plot-no',
-            html: `<span>${id.slice(-4)}</span>`,
+            html: `<span>${escapeHtml(id.slice(-4))}</span>`,
             iconSize: [0, 0],
           }),
         }).addTo(labelsGroup)
@@ -420,11 +421,11 @@ export default function MapView({
         fillColor: issueColor[f.properties.severity],
         fillOpacity: 0.55,
       }),
-      onEachFeature: (f, lyr) =>
-        lyr.bindTooltip(
-          `<b>${ISSUE_LABEL[f.properties.type] || f.properties.type}</b><br>${f.properties.message}`,
-          { sticky: true }
-        ),
+      onEachFeature: (f, lyr) => {
+        const typeLabel = escapeHtml(ISSUE_LABEL[f.properties.type] || f.properties.type || 'Issue')
+        const msg = escapeHtml(f.properties.message || '')
+        lyr.bindTooltip(`<b>${typeLabel}</b><br>${msg}`, { sticky: true })
+      },
     })
 
     syncVisibility()

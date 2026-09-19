@@ -975,6 +975,83 @@ button, select, textarea { font: inherit; color: inherit; }
   color: #4a3400;
 }
 
+/* ------------------------------------------------------------------ open results & drag-drop */
+.open-results-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #f0f4fa;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  font-weight: 500;
+  font-size: 12.5px;
+  height: 32px;
+  padding: 0 10px;
+}
+.open-results-btn:hover {
+  background: #e2eaf4;
+  border-color: #b5c7dc;
+}
+.open-results-btn svg {
+  color: var(--accent);
+}
+
+.dropzone-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  background: rgba(18, 35, 63, 0.72);
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  animation: fadeIn 0.15s ease-out;
+}
+.dropzone-card {
+  background: #ffffff;
+  border: 2px dashed var(--accent);
+  border-radius: 14px;
+  padding: 36px 48px;
+  text-align: center;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 440px;
+}
+.dropzone-card svg {
+  color: var(--accent);
+  stroke-width: 2.2;
+}
+.dropzone-card h3 {
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0;
+}
+.dropzone-card p {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 0;
+}
+
+.import-error-box {
+  max-width: 520px;
+}
+.import-err-msg {
+  color: var(--bad);
+  font-weight: 600;
+  font-size: 14px;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  background: #fff0f1;
+  border: 1px solid #fed7d7;
+  border-radius: 6px;
+  word-break: break-word;
+}
+
 /* ------------------------------------------------------------------ narrow screens */
 @media (max-width: 1080px) {
   .app { grid-template-columns: 1fr; grid-template-rows: auto 62vh auto auto; height: auto; min-height: 100%; }

@@ -73,7 +73,7 @@ Acceptance: with a synthetic label file the trainer runs and the classifier chan
 
 ---
 
-## [ ] Task 5 - Import results (works for any area without a server)
+## [x] Task 5 - Import results (works for any area without a server)
 Steps
 1. CLI `pack` command: zip a processed scene (`manifest.json`, `ortho.jpg`, `masks.png`, `segments.png`, all GeoJSON layers, GeoPackage) into `<scene>_dhara_results.zip`. The Colab notebook calls it at the end.
 2. Frontend: "Open results" button plus drag-and-drop zone. Read the zip client-side (add `jszip`), validate the manifest, create object URLs for images, and load it as a scene selectable in the dropdown. Show a clear error if a required file is missing.

@@ -1,4 +1,5 @@
 import L from 'leaflet'
+import { escapeHtml } from './sanitize'
 
 /**
  * Single shared hover controller for map parcel layers.
@@ -163,19 +164,24 @@ export function createHoverController({ map, getStyle, getTooltipContent }) {
 
 export function getParcelTooltipHtml(properties) {
   const p = properties || {}
-  const id = p.parcel_id || ''
-  const shortId = id.slice(-4)
+  const rawId = p.parcel_id || ''
+  const shortId = escapeHtml(rawId.slice(-4))
   const area = Number(p.area_m2 || 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })
-  const prio = p.review_priority || 'Low'
+  const rawPrio = p.review_priority || 'Low'
+  const prio = escapeHtml(rawPrio)
+  const prioClass = escapeHtml(rawPrio.toLowerCase())
+  const landuse = escapeHtml(p.landuse || 'Unknown')
+  const reasons = p.review_reasons ? escapeHtml(p.review_reasons) : ''
+
   return `
     <div class="parcel-tip">
       <div class="tip-top">
         <strong>Plot ${shortId}</strong>
-        <span class="tip-prio prio ${prio.toLowerCase()}">${prio}</span>
+        <span class="tip-prio prio ${prioClass}">${prio}</span>
       </div>
       <div class="tip-row"><span>Area:</span> <b>${area} m²</b></div>
-      <div class="tip-row"><span>Land use:</span> <b>${p.landuse || 'Unknown'}</b></div>
-      ${p.review_reasons ? `<div class="tip-reason">${p.review_reasons}</div>` : ''}
+      <div class="tip-row"><span>Land use:</span> <b>${landuse}</b></div>
+      ${reasons ? `<div class="tip-reason">${reasons}</div>` : ''}
     </div>
   `
 }

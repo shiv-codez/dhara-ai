@@ -11,6 +11,7 @@ import argparse
 import json
 import shutil
 import warnings
+import zipfile
 from pathlib import Path
 
 from .config import DATA_OUT, SCENES, Params
@@ -36,6 +37,44 @@ def publish(scene_ids: list[str], dest: Path) -> None:
     print(f"published {len(index)} scene(s) -> {dest}")
 
 
+def pack(scene_id_or_path: str, out: Path | None = None) -> Path:
+    src = DATA_OUT / scene_id_or_path / "web"
+    if not src.exists():
+        p = Path(scene_id_or_path)
+        if (p / "manifest.json").exists():
+            src = p
+        elif (p / "web" / "manifest.json").exists():
+            src = p / "web"
+        elif (DATA_OUT / scene_id_or_path).exists() and (DATA_OUT / scene_id_or_path / "manifest.json").exists():
+            src = DATA_OUT / scene_id_or_path
+        else:
+            raise FileNotFoundError(f"Scene web directory not found for '{scene_id_or_path}' at {src}")
+
+    sid = scene_id_or_path if scene_id_or_path in SCENES else Path(scene_id_or_path).name
+    out_path = out if out is not None else Path(f"{sid}_dhara_results.zip")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    man_file = src / "manifest.json"
+    if not man_file.exists():
+        raise FileNotFoundError(f"manifest.json not found in {src}")
+
+    man = json.loads(man_file.read_text(encoding="utf-8"))
+    if "schema_version" not in man:
+        man["schema_version"] = 1
+        man_file.write_text(json.dumps(man, indent=1), encoding="utf-8")
+
+    with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for f in PUBLISH_FILES:
+            fp = src / f
+            if fp.exists():
+                zf.write(fp, arcname=f)
+        for gpkg in src.glob("*.gpkg"):
+            zf.write(gpkg, arcname=gpkg.name)
+
+    print(f"Packed scene '{sid}' -> {out_path}")
+    return out_path
+
+
 def main() -> None:
     warnings.filterwarnings("ignore")
     ap = argparse.ArgumentParser(prog="dhara")
@@ -53,6 +92,11 @@ def main() -> None:
     tr = sub.add_parser("train", help="train a second-stage veto classifier from officer label files")
     tr.add_argument("labels", nargs="+", type=Path, help="one or more exported review label JSON files")
     tr.add_argument("--out", type=Path, default=Path("models/dhara_classifier.joblib"), help="output joblib path")
+
+    # Subcommand: pack
+    pk = sub.add_parser("pack", help="package scene outputs into a results zip archive")
+    pk.add_argument("scene", help="scene id or directory")
+    pk.add_argument("--out", type=Path, default=None, help="output zip file path")
 
     a = ap.parse_args()
     if a.cmd == "run":
@@ -77,6 +121,13 @@ def main() -> None:
         clf = train(labels, log=print)
         clf.save(a.out)
         print(f"Saved classifier -> {a.out}")
+
+    elif a.cmd == "pack":
+        pack(a.scene, out=a.out)
+
+
+if __name__ == "__main__":
+    main()
 
 
 if __name__ == "__main__":

@@ -16,8 +16,38 @@ import {
   exportLabelsFromBackup,
 } from './lib/data.js'
 import { overlapsFor, resolveOverlaps, areaM2, boundsOf } from './lib/geo.js'
+import { importResultsZip } from './lib/importZip.js'
 
 const STEP_MS = 2600
+
+function ImportErrorModal({ error, onClose }) {
+  if (!error) return null
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="import-err-title">
+      <div className="modal-box import-error-box">
+        <div className="modal-head">
+          <h3 id="import-err-title">Could not open results archive</h3>
+        </div>
+        <div className="modal-body">
+          <p className="import-err-msg">{error}</p>
+          <div className="callout info">
+            <p>
+              Dhara.ai accepts ZIP packages generated with <code>python -m dhara.cli pack &lt;scene&gt;</code> or downloaded from the Google Colab run.
+            </p>
+            <p className="fine">
+              Ensure the archive contains <code>manifest.json</code> and GeoJSON candidate layers without path traversal or nested folders.
+            </p>
+          </div>
+        </div>
+        <div className="modal-actions">
+          <button type="button" className="btn primary" onClick={onClose}>
+            Dismiss
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function BulkConfirmModal({ count, onConfirm, onCancel }) {
   return (
@@ -139,8 +169,86 @@ export default function App() {
   // Invalidation & Data Fingerprint Banner
   const [invalidationBanner, setInvalidationBanner] = useState(null)
 
+  // Imported Scenes & ZIP Dropzone
+  const [importedScenes, setImportedScenes] = useState({})
+  const [importError, setImportError] = useState(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const fileInputRef = useRef(null)
+
   const timers = useRef([])
   const stageRef = useRef(null)
+
+  // ------------------------------------------------------------------ import file handler
+  const handleImportFile = async (file) => {
+    if (!file) return
+    try {
+      setImportError(null)
+      const imported = await importResultsZip(file)
+      setImportedScenes((prev) => {
+        if (prev[imported.id]?.cleanup) {
+          try { prev[imported.id].cleanup() } catch {}
+        }
+        return { ...prev, [imported.id]: imported }
+      })
+      setSceneId(imported.id)
+    } catch (err) {
+      console.error('Import error:', err)
+      setImportError(err.message || 'Failed to import results zip.')
+    }
+  }
+
+  // ------------------------------------------------------------------ window drag & drop
+  useEffect(() => {
+    let dragCounter = 0
+    const onDragEnter = (e) => {
+      e.preventDefault()
+      dragCounter++
+      if (e.dataTransfer?.types && Array.from(e.dataTransfer.types).includes('Files')) {
+        setIsDragging(true)
+      }
+    }
+    const onDragOver = (e) => {
+      e.preventDefault()
+    }
+    const onDragLeave = (e) => {
+      e.preventDefault()
+      dragCounter--
+      if (dragCounter <= 0) {
+        dragCounter = 0
+        setIsDragging(false)
+      }
+    }
+    const onDrop = async (e) => {
+      e.preventDefault()
+      dragCounter = 0
+      setIsDragging(false)
+      if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+        const file = e.dataTransfer.files[0]
+        await handleImportFile(file)
+      }
+    }
+    window.addEventListener('dragenter', onDragEnter)
+    window.addEventListener('dragover', onDragOver)
+    window.addEventListener('dragleave', onDragLeave)
+    window.addEventListener('drop', onDrop)
+    return () => {
+      window.removeEventListener('dragenter', onDragEnter)
+      window.removeEventListener('dragover', onDragOver)
+      window.removeEventListener('dragleave', onDragLeave)
+      window.removeEventListener('drop', onDrop)
+    }
+  }, [importedScenes])
+
+  // Cleanup object URLs on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(importedScenes).forEach((s) => {
+        if (s.cleanup) {
+          try { s.cleanup() } catch {}
+        }
+      })
+    }
+  }, [importedScenes])
 
   // ------------------------------------------------------------------ load scenes
   useEffect(() => {
@@ -152,7 +260,17 @@ export default function App() {
     let live = true
     setScene(null)
     setInvalidationBanner(null)
-    loadScene(sceneId)
+
+    const getSceneData = () => {
+      if (sceneId.startsWith('imported:')) {
+        const imp = importedScenes[sceneId]
+        if (imp) return Promise.resolve(imp)
+        return Promise.reject(new Error(`Imported scene "${sceneId}" not found in current session.`))
+      }
+      return loadScene(sceneId)
+    }
+
+    getSceneData()
       .then((s) => {
         if (!live) return
         const saved = loadSaved(sceneId)
@@ -194,10 +312,12 @@ export default function App() {
         setScene(s)
         goStep(0, false)
       })
-      .catch(() => live && setError('Scene data could not be loaded. Run the pipeline and publish its outputs (see README).'))
+      .catch((err) => {
+        if (live) setError(err.message || 'Scene data could not be loaded.')
+      })
     return () => { live = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sceneId])
+  }, [sceneId, importedScenes])
 
   // persist review work
   useEffect(() => {
@@ -516,6 +636,15 @@ export default function App() {
   const issues = useMemo(() => (scene ? (fixMode === 'before' ? scene.data.issues_before_fix : scene.data.issues).features : []), [scene, fixMode])
   const styleMode = STEPS[stepIdx].styleMode || 'landuse'
 
+  const allSceneOptions = useMemo(() => {
+    const builtIn = index || []
+    const imported = Object.values(importedScenes).map((s) => ({
+      id: s.id,
+      title: s.title,
+    }))
+    return [...builtIn, ...imported]
+  }, [index, importedScenes])
+
   if (error) return <div className="boot"><h1>Dhara.ai</h1><p>{error}</p></div>
   if (!scene || !parcels) return <div className="boot"><h1>Dhara.ai</h1><p>Loading scene…</p></div>
 
@@ -553,9 +682,33 @@ export default function App() {
         <label className="scene-pick">
           <span className="sr">Scene</span>
           <select value={sceneId} onChange={(e) => { stop(); setSceneId(e.target.value) }}>
-            {index.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
+            {allSceneOptions.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
           </select>
         </label>
+
+        <button
+          type="button"
+          className="btn open-results-btn"
+          onClick={() => fileInputRef.current?.click()}
+          title="Open packed results ZIP (or drop anywhere)"
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5-5 5 5M12 5v12" />
+          </svg>
+          Open results
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".zip,application/zip"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            if (e.target.files && e.target.files[0]) {
+              handleImportFile(e.target.files[0])
+              e.target.value = ''
+            }
+          }}
+        />
 
         {/* Live Officer Header Progress */}
         <div className="header-progress" aria-label="Review progress">
@@ -865,6 +1018,22 @@ export default function App() {
           onCancel={() => setBulkConfirmOpen(false)}
         />
       )}
+
+      {/* Drag and Drop Full-Window Overlay */}
+      {isDragging && (
+        <div className="dropzone-overlay" aria-hidden="true">
+          <div className="dropzone-card">
+            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5-5 5 5M12 5v12" />
+            </svg>
+            <h3>Drop results ZIP here</h3>
+            <p>Load candidate layers and orthomosaic into Dhara.ai</p>
+          </div>
+        </div>
+      )}
+
+      {/* Import Error Modal */}
+      <ImportErrorModal error={importError} onClose={() => setImportError(null)} />
     </div>
   )
 }

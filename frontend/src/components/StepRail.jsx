@@ -2,8 +2,10 @@ import { STEPS, LAYER_DEFS } from '../lib/steps.js'
 
 export default function StepRail({ stepIdx, onStep, playing, onPlay, onStop, vis, onToggleLayer, regMode, onRegMode, fixMode, onFixMode, manifest }) {
   const step = STEPS[stepIdx]
-  const reg = manifest.regularisation
-  const topo = manifest.topology
+  const reg = manifest?.regularisation
+  const topo = manifest?.topology || { before_fix: {}, after_fix: {} }
+  const beforeFix = topo.before_fix || {}
+  const afterFix = topo.after_fix || {}
   return (
     <aside className="rail" aria-label="Pipeline">
       <div className="rail-head">
@@ -29,10 +31,12 @@ export default function StepRail({ stepIdx, onStep, playing, onPlay, onStop, vis
                       <button className={regMode === 'raw' ? 'on' : ''} onClick={() => onRegMode('raw')}>Raw mask outline</button>
                       <button className={regMode === 'clean' ? 'on' : ''} onClick={() => onRegMode('clean')}>Cleaned polygons</button>
                     </div>
-                    <dl className="mini-stats">
-                      <div><dt>Vertices</dt><dd>{reg.vertices_raw.toLocaleString('en-IN')} <i>to</i> {reg.vertices_regularised.toLocaleString('en-IN')}</dd></div>
-                      <div><dt>Right-angle corners</dt><dd>{Math.round(reg.right_angle_share_simplified_only * 100)}% <i>to</i> {Math.round(reg.right_angle_share_regularised * 100)}%</dd></div>
-                    </dl>
+                    {reg && (
+                      <dl className="mini-stats">
+                        <div><dt>Vertices</dt><dd>{reg.vertices_raw?.toLocaleString('en-IN') ?? '—'} <i>to</i> {reg.vertices_regularised?.toLocaleString('en-IN') ?? '—'}</dd></div>
+                        <div><dt>Right-angle corners</dt><dd>{Math.round((reg.right_angle_share_simplified_only || 0) * 100)}% <i>to</i> {Math.round((reg.right_angle_share_regularised || 0) * 100)}%</dd></div>
+                      </dl>
+                    )}
                     <p className="fine">Right-angle share compares simplification alone with simplification plus edge fitting, within 5 degrees.</p>
                   </>
                 )}
@@ -44,7 +48,7 @@ export default function StepRail({ stepIdx, onStep, playing, onPlay, onStop, vis
                       <button className={fixMode === 'after' ? 'on' : ''} onClick={() => onFixMode('after')}>After auto-fix</button>
                     </div>
                     <p className="fine">
-                      Flags: {Object.values(topo.before_fix).reduce((a, b) => a + b, 0)} before, {Object.values(topo.after_fix).reduce((a, b) => a + b, 0)} after.
+                      Flags: {Object.values(beforeFix).reduce((a, b) => a + b, 0)} before, {Object.values(afterFix).reduce((a, b) => a + b, 0)} after.
                       Auto-fix only resolves parcel overlaps; everything else is left for the officer.
                     </p>
                   </>

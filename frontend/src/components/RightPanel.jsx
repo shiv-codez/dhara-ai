@@ -403,8 +403,10 @@ function ParcelTab({
 
 /* ------------------------------------------------------------------------------------- checks */
 function ChecksTab({ manifest, issues, fixMode, onFocus }) {
-  const topo = manifest.topology
-  const types = useMemo(() => [...new Set([...Object.keys(topo.before_fix), ...Object.keys(topo.after_fix)])], [topo])
+  const topo = manifest?.topology || { before_fix: {}, after_fix: {} }
+  const beforeFix = topo.before_fix || {}
+  const afterFix = topo.after_fix || {}
+  const types = useMemo(() => [...new Set([...Object.keys(beforeFix), ...Object.keys(afterFix)])], [beforeFix, afterFix])
   const sevRank = { error: 0, warning: 1, info: 2 }
   const sorted = [...issues].sort((a, b) => sevRank[a.properties.severity] - sevRank[b.properties.severity])
   return (
@@ -413,7 +415,7 @@ function ChecksTab({ manifest, issues, fixMode, onFocus }) {
         <thead><tr><th>Rule</th><th>Before</th><th>After</th></tr></thead>
         <tbody>
           {types.map((t) => (
-            <tr key={t}><td>{ISSUE_LABEL[t] || t}</td><td>{topo.before_fix[t] || 0}</td><td>{topo.after_fix[t] || 0}</td></tr>
+            <tr key={t}><td>{ISSUE_LABEL[t] || t}</td><td>{beforeFix[t] || 0}</td><td>{afterFix[t] || 0}</td></tr>
           ))}
         </tbody>
       </table>
@@ -437,7 +439,7 @@ function ChecksTab({ manifest, issues, fixMode, onFocus }) {
 }
 
 /* ------------------------------------------------------------------------------------- report */
-function ReportTab({ manifest: m, reviewed, approved, flagged = 0, rejected = 0, total }) {
+function ReportTab({ manifest: m = {}, reviewed, approved, flagged = 0, rejected = 0, total }) {
   const t = m.timings_s
   const geo = m.georef_source === 'assumed_demo'
   return (
@@ -445,17 +447,17 @@ function ReportTab({ manifest: m, reviewed, approved, flagged = 0, rejected = 0,
       <section>
         <h3>Scene</h3>
         <dl className="facts">
-          <div><dt>Size</dt><dd>{m.size_px[0]} × {m.size_px[1]} px</dd></div>
-          <div><dt>Ground resolution</dt><dd>{m.gsd_m} m/px</dd></div>
-          <div><dt>Area</dt><dd>{fmt(m.area_ha, 2)} ha</dd></div>
-          <div><dt>CRS</dt><dd>{m.crs}</dd></div>
+          <div><dt>Size</dt><dd>{m.size_px ? `${m.size_px[0]} × ${m.size_px[1]} px` : '—'}</dd></div>
+          <div><dt>Ground resolution</dt><dd>{m.gsd_m != null ? `${m.gsd_m} m/px` : '—'}</dd></div>
+          <div><dt>Area</dt><dd>{m.area_ha != null ? `${fmt(m.area_ha, 2)} ha` : '—'}</dd></div>
+          <div><dt>CRS</dt><dd>{m.crs || '—'}</dd></div>
         </dl>
         {geo && <p className="callout">Georeference is assumed for this demo image (no survey metadata). A real orthomosaic GeoTIFF brings its own CRS and transform.</p>}
       </section>
       <section>
         <h3>What the pipeline produced</h3>
         <dl className="facts">
-          <div><dt>Model</dt><dd>{m.model}</dd></div>
+          <div><dt>Model</dt><dd>{m.model || 'MobileSAM'}</dd></div>
           <div>
             <dt>Classifier</dt>
             <dd>
@@ -464,24 +466,33 @@ function ReportTab({ manifest: m, reviewed, approved, flagged = 0, rejected = 0,
                 : 'Rule-based'}
             </dd>
           </div>
-          <div><dt>Segments proposed</dt><dd>{m.counts.sam_instances}</dd></div>
-          <div><dt>Building footprints</dt><dd>{m.counts.buildings}</dd></div>
-          <div><dt>Candidate parcels</dt><dd>{m.counts.parcels}</dd></div>
-          <div><dt>Road corridors</dt><dd>{m.counts.road_corridors}</dd></div>
-          <div><dt>Ground covered by</dt><dd>{m.coverage.building_pct}% roofs, {m.coverage.road_pct}% lanes, {m.coverage.vegetation_pct}% trees</dd></div>
+          <div><dt>Segments proposed</dt><dd>{m.counts?.sam_instances ?? '—'}</dd></div>
+          <div><dt>Building footprints</dt><dd>{m.counts?.buildings ?? '—'}</dd></div>
+          <div><dt>Candidate parcels</dt><dd>{m.counts?.parcels ?? '—'}</dd></div>
+          <div><dt>Road corridors</dt><dd>{m.counts?.road_corridors ?? '—'}</dd></div>
+          <div>
+            <dt>Ground covered by</dt>
+            <dd>
+              {m.coverage
+                ? `${m.coverage.building_pct}% roofs, ${m.coverage.road_pct}% lanes, ${m.coverage.vegetation_pct}% trees`
+                : '—'}
+            </dd>
+          </div>
         </dl>
         {m.classifier && (
           <p className="fine">Labels come from parcels the officer chose to review, so results on unreviewed areas are not measured.</p>
         )}
       </section>
-      <section>
-        <h3>Measured run time</h3>
-        <dl className="facts">
-          <div><dt>Segmentation</dt><dd>{fmt(t.segmentation_s)} s on 1 CPU core</dd></div>
-          <div><dt>Everything after</dt><dd>{fmt(t.classification_s + t.vectorisation_s + t.parcel_inference_s + t.topology_s, 1)} s</dd></div>
-        </dl>
-        <p className="fine">Segmentation time is from the run that produced the cached masks; a GPU is far faster.</p>
-      </section>
+      {t && (
+        <section>
+          <h3>Measured run time</h3>
+          <dl className="facts">
+            <div><dt>Segmentation</dt><dd>{fmt(t.segmentation_s)} s on 1 CPU core</dd></div>
+            <div><dt>Everything after</dt><dd>{fmt(t.classification_s + t.vectorisation_s + t.parcel_inference_s + t.topology_s, 1)} s</dd></div>
+          </dl>
+          <p className="fine">Segmentation time is from the run that produced the cached masks; a GPU is far faster.</p>
+        </section>
+      )}
       <section>
         <h3>Ground-truth check</h3>
         <p className="callout">No reference polygons were supplied for this scene, so no accuracy figure is shown. IoU, F1 and boundary offset will be computed here once survey data is loaded.</p>

@@ -314,6 +314,7 @@ def run_scene(scene: Scene, params: Params | None = None, segmenter=None, out_di
                             web_dir / f"{scene.id}_dhara_candidates.gpkg")
 
     manifest = {
+        "schema_version": 1,
         "scene": scene.id, "title": scene.title, "description": scene.description,
         "bounds": wgs84_bounds(tif), "size_px": [w, h], "gsd_m": round(gsd, 4), "crs": str(crs),
         "georef_source": tags.get("GEOREF_SOURCE", "embedded"),
