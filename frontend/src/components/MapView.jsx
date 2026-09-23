@@ -82,6 +82,7 @@ export default function MapView({
   fitNonce = 0,
   compareActive = false,
   comparePos = 50,
+  groundTruthResult = null,
 }) {
   const el = useRef(null)
   const map = useRef(null)
@@ -124,8 +125,9 @@ export default function MapView({
     m.createPane('orthoPane').style.zIndex = 200
     m.createPane('segPane').style.zIndex = 250
     m.createPane('maskPane').style.zIndex = 260
-    m.createPane('bldPane').style.zIndex = 420
     m.createPane('parcelPane').style.zIndex = 410
+    m.createPane('bldPane').style.zIndex = 420
+    m.createPane('gtPane').style.zIndex = 430
     m.createPane('overlapPane').style.zIndex = 450
     m.createPane('issuePane').style.zIndex = 460
     m.createPane('labelPane').style.zIndex = 470
@@ -431,6 +433,89 @@ export default function MapView({
     syncVisibility()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scene, fixMode])
+
+  // ---------------------------------------------------------------- ground-truth evaluation layer
+  useEffect(() => {
+    const m = map.current
+    if (!m) return
+
+    if (L_.current.groundTruth) {
+      if (m.hasLayer(L_.current.groundTruth)) {
+        m.removeLayer(L_.current.groundTruth)
+      }
+      L_.current.groundTruth = null
+    }
+
+    if (!groundTruthResult || !groundTruthResult.layers) return
+
+    const group = L.layerGroup()
+
+    // 1. Matched Candidate Buildings (TP) - Solid Green
+    const tpLayer = L.geoJSON(groundTruthResult.layers.tp, {
+      pane: 'gtPane',
+      style: {
+        color: '#10B981',
+        weight: 2.5,
+        fillColor: '#10B981',
+        fillOpacity: 0.35,
+      },
+      onEachFeature: (f, lyr) => {
+        const iouPct = ((f.properties.iou || 0) * 100).toFixed(1)
+        lyr.bindTooltip(
+          `<b>Matched Building (TP)</b><br>IoU: <b>${iouPct}%</b> (Threshold ≥ 50%)`,
+          { sticky: true }
+        )
+      },
+    })
+    group.addLayer(tpLayer)
+
+    // 2. False Positive Candidate Buildings (FP) - Red
+    const fpLayer = L.geoJSON(groundTruthResult.layers.fp, {
+      pane: 'gtPane',
+      style: {
+        color: '#EF4444',
+        weight: 2,
+        fillColor: '#EF4444',
+        fillOpacity: 0.28,
+      },
+      onEachFeature: (f, lyr) => {
+        lyr.bindTooltip(
+          `<b>False Positive Candidate (FP)</b><br>No matching reference building (IoU &lt; 50%)`,
+          { sticky: true }
+        )
+      },
+    })
+    group.addLayer(fpLayer)
+
+    // 3. Missed Ground-Truth Buildings (FN) - Dashed Purple
+    const fnLayer = L.geoJSON(groundTruthResult.layers.fn, {
+      pane: 'gtPane',
+      style: {
+        color: '#A855F7',
+        weight: 2.5,
+        dashArray: '6 4',
+        fillColor: '#A855F7',
+        fillOpacity: 0.22,
+      },
+      onEachFeature: (f, lyr) => {
+        lyr.bindTooltip(
+          `<b>Missed Reference Building (FN)</b><br>Reference survey building not matched by candidate`,
+          { sticky: true }
+        )
+      },
+    })
+    group.addLayer(fnLayer)
+
+    group.addTo(m)
+    L_.current.groundTruth = group
+
+    return () => {
+      if (L_.current.groundTruth && m.hasLayer(L_.current.groundTruth)) {
+        m.removeLayer(L_.current.groundTruth)
+        L_.current.groundTruth = null
+      }
+    }
+  }, [groundTruthResult])
 
   // ---------------------------------------------------------------- visibility sync
   function syncVisibility() {

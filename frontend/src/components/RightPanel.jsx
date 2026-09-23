@@ -439,9 +439,26 @@ function ChecksTab({ manifest, issues, fixMode, onFocus }) {
 }
 
 /* ------------------------------------------------------------------------------------- report */
-function ReportTab({ manifest: m = {}, reviewed, approved, flagged = 0, rejected = 0, total }) {
+export function ReportTab({
+  manifest: m = {},
+  reviewed,
+  approved,
+  flagged = 0,
+  rejected = 0,
+  total,
+  sceneId,
+  groundTruthResult,
+  referenceSource,
+  referenceError,
+  onLoadReferenceFile,
+  onLoadSampleReference,
+  onClearReference,
+  hasSampleReference,
+}) {
   const t = m.timings_s
   const geo = m.georef_source === 'assumed_demo'
+  const fileInputRef = useRef(null)
+
   return (
     <div className="report">
       <section>
@@ -454,6 +471,7 @@ function ReportTab({ manifest: m = {}, reviewed, approved, flagged = 0, rejected
         </dl>
         {geo && <p className="callout">Georeference is assumed for this demo image (no survey metadata). A real orthomosaic GeoTIFF brings its own CRS and transform.</p>}
       </section>
+
       <section>
         <h3>What the pipeline produced</h3>
         <dl className="facts">
@@ -483,6 +501,7 @@ function ReportTab({ manifest: m = {}, reviewed, approved, flagged = 0, rejected
           <p className="fine">Labels come from parcels the officer chose to review, so results on unreviewed areas are not measured.</p>
         )}
       </section>
+
       {t && (
         <section>
           <h3>Measured run time</h3>
@@ -493,10 +512,166 @@ function ReportTab({ manifest: m = {}, reviewed, approved, flagged = 0, rejected
           <p className="fine">Segmentation time is from the run that produced the cached masks; a GPU is far faster.</p>
         </section>
       )}
-      <section>
-        <h3>Ground-truth check</h3>
-        <p className="callout">No reference polygons were supplied for this scene, so no accuracy figure is shown. IoU, F1 and boundary offset will be computed here once survey data is loaded.</p>
+
+      {/* Ground-truth Check Section */}
+      <section className="gt-section">
+        <div className="section-head-with-action">
+          <h3>Ground-truth check</h3>
+          {groundTruthResult && (
+            <button
+              type="button"
+              className="btn btn-sm btn-clear-gt"
+              onClick={onClearReference}
+              title="Unload reference data and return to unverified baseline"
+            >
+              Clear reference
+            </button>
+          )}
+        </div>
+
+        {!groundTruthResult ? (
+          <div className="gt-unverified">
+            <p className="callout">
+              No reference polygons were supplied for this scene, so no accuracy figure is shown. IoU, F1 and boundary offset will be computed here once survey data is loaded.
+            </p>
+
+            <div className="gt-loader-box">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".geojson,.json,application/geo+json,application/json"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    onLoadReferenceFile(e.target.files[0])
+                    e.target.value = ''
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="btn gt-upload-btn"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5-5 5 5M12 5v12" />
+                </svg>
+                Upload reference GeoJSON
+              </button>
+
+              {hasSampleReference && (
+                <div className="sample-gt-wrap">
+                  <button
+                    type="button"
+                    className="btn primary gt-sample-btn"
+                    onClick={onLoadSampleReference}
+                  >
+                    Load sample reference (55 buildings)
+                  </button>
+                  <p className="fine">Hand-digitised survey reference polygons for {sceneId}.</p>
+                </div>
+              )}
+            </div>
+
+            {referenceError && (
+              <div className="callout danger gt-error">
+                <p><b>Error loading reference:</b> {referenceError}</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="gt-results">
+            <div className="gt-source-card">
+              <span className="gt-status-dot verified" aria-hidden="true" />
+              <div className="gt-source-info">
+                <span className="gt-source-title">Reference Layer Active</span>
+                <span className="gt-source-desc">
+                  {referenceSource?.name || 'Custom reference'} ({referenceSource?.count || groundTruthResult.summary.n_gt} survey buildings)
+                </span>
+              </div>
+            </div>
+
+            {/* Test Conditions Card */}
+            <div className="gt-conditions-card">
+              <h4>Test conditions</h4>
+              <dl className="facts compact">
+                <div><dt>Scene ID</dt><dd><code>{sceneId}</code></dd></div>
+                <div><dt>Reference buildings (N_gt)</dt><dd>{groundTruthResult.summary.n_gt}</dd></div>
+                <div><dt>Candidate buildings (N_cand)</dt><dd>{groundTruthResult.summary.n_pred}</dd></div>
+                <div><dt>IoU match threshold</dt><dd>≥ 0.50</dd></div>
+                <div><dt>Offset sampling step</dt><dd>0.5 m</dd></div>
+              </dl>
+            </div>
+
+            {/* Metrics Scorecard Grid */}
+            <div className="gt-scorecard-grid">
+              <div className="gt-metric-card">
+                <span className="gt-metric-label">Precision</span>
+                <span className="gt-metric-val">{(groundTruthResult.summary.precision * 100).toFixed(1)}%</span>
+                <span className="gt-metric-sub">{groundTruthResult.summary.tp} / {groundTruthResult.summary.n_pred} candidates matched</span>
+              </div>
+              <div className="gt-metric-card">
+                <span className="gt-metric-label">Recall</span>
+                <span className="gt-metric-val">{(groundTruthResult.summary.recall * 100).toFixed(1)}%</span>
+                <span className="gt-metric-sub">{groundTruthResult.summary.tp} / {groundTruthResult.summary.n_gt} reference matched</span>
+              </div>
+              <div className="gt-metric-card highlight">
+                <span className="gt-metric-label">F1 Score</span>
+                <span className="gt-metric-val">{(groundTruthResult.summary.f1 * 100).toFixed(1)}%</span>
+                <span className="gt-metric-sub">Harmonic mean (IoU ≥ 0.50)</span>
+              </div>
+              <div className="gt-metric-card">
+                <span className="gt-metric-label">Mean Matched IoU</span>
+                <span className="gt-metric-val">{(groundTruthResult.summary.mean_matched_iou * 100).toFixed(1)}%</span>
+                <span className="gt-metric-sub">Across {groundTruthResult.summary.tp} true positives</span>
+              </div>
+            </div>
+
+            {/* Boundary Offset Card */}
+            <div className="gt-offset-card">
+              <h4>Boundary offset (metres)</h4>
+              <dl className="facts compact">
+                <div><dt>Mean offset</dt><dd><b>{groundTruthResult.summary.boundary_offset.mean_m} m</b></dd></div>
+                <div><dt>Median (p50)</dt><dd>{groundTruthResult.summary.boundary_offset.median_m} m</dd></div>
+                <div><dt>90th percentile (p90)</dt><dd><b>{groundTruthResult.summary.boundary_offset.p90_m} m</b></dd></div>
+                <div><dt>RMSE</dt><dd>{groundTruthResult.summary.boundary_offset.rmse_m} m</dd></div>
+              </dl>
+              <p className="fine">Distance measured from sampled candidate boundary points to nearest reference boundary segment.</p>
+            </div>
+
+            {/* Footprint Classification Breakdown */}
+            <div className="gt-breakdown-card">
+              <h4>Footprint classification on map</h4>
+              <ul className="gt-breakdown-list">
+                <li className="gt-breakdown-item tp">
+                  <span className="gt-chip tp">TP</span>
+                  <div className="gt-breakdown-text">
+                    <b>{groundTruthResult.summary.tp} Matched buildings</b>
+                    <span>Candidate matched to reference (IoU ≥ 50%)</span>
+                  </div>
+                </li>
+                <li className="gt-breakdown-item fp">
+                  <span className="gt-chip fp">FP</span>
+                  <div className="gt-breakdown-text">
+                    <b>{groundTruthResult.summary.fp} False positive candidates</b>
+                    <span>AI candidate without reference building</span>
+                  </div>
+                </li>
+                <li className="gt-breakdown-item fn">
+                  <span className="gt-chip fn">FN</span>
+                  <div className="gt-breakdown-text">
+                    <b>{groundTruthResult.summary.fn} Missed reference buildings</b>
+                    <span>Reference building not detected by AI</span>
+                  </div>
+                </li>
+              </ul>
+            </div>
+
+            <p className="fine">Computed in-browser matching backend/dhara/metrics.py. IoU evaluated at exact polygon intersections; boundary offset sampled at 0.5 m.</p>
+          </div>
+        )}
       </section>
+
       <section>
         <h3>Review</h3>
         <dl className="facts">

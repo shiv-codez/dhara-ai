@@ -3,6 +3,7 @@ import MapView from './components/MapView.jsx'
 import StepRail from './components/StepRail.jsx'
 import RightPanel, { sortQueueFeatures } from './components/RightPanel.jsx'
 import Legend from './components/Legend.jsx'
+import ReferenceMode from './components/ReferenceMode.jsx'
 import { STEPS, STATUS } from './lib/steps.js'
 import {
   loadIndex,
@@ -17,6 +18,7 @@ import {
 } from './lib/data.js'
 import { overlapsFor, resolveOverlaps, areaM2, boundsOf } from './lib/geo.js'
 import { importResultsZip } from './lib/importZip.js'
+import { computeMetrics } from './lib/metrics.js'
 
 const STEP_MS = 2600
 
@@ -174,6 +176,88 @@ export default function App() {
   const [importError, setImportError] = useState(null)
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef(null)
+
+  // Temporary Reference Mode (ground-truth digitisation, gitignored)
+  const [refMode, setRefMode] = useState(false)
+
+  // Ground Truth Evaluation State (Task 6)
+  const [referenceData, setReferenceData] = useState(null)
+  const [referenceSource, setReferenceSource] = useState(null)
+  const [referenceError, setReferenceError] = useState(null)
+
+  // Reset reference evaluation on scene switch to prevent cross-scene contamination
+  useEffect(() => {
+    setReferenceData(null)
+    setReferenceSource(null)
+    setReferenceError(null)
+  }, [sceneId])
+
+  // Compute Ground-truth accuracy & boundary metrics when reference layer is present
+  const groundTruthResult = useMemo(() => {
+    if (!referenceData || !scene?.data?.buildings) return null
+    try {
+      return computeMetrics(scene.data.buildings, referenceData, 0.5, 0.5)
+    } catch (err) {
+      console.error('Ground-truth evaluation failed:', err)
+      return null
+    }
+  }, [referenceData, scene])
+
+  const handleLoadReferenceFile = useCallback(async (file) => {
+    if (!file) return
+    try {
+      setReferenceError(null)
+      const text = await file.text()
+      let parsed
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        throw new Error('File is not valid JSON.')
+      }
+      if (parsed.type !== 'FeatureCollection' && parsed.type !== 'Feature') {
+        throw new Error('GeoJSON must be a FeatureCollection or Feature.')
+      }
+      const fc = parsed.type === 'FeatureCollection' ? parsed : { type: 'FeatureCollection', features: [parsed] }
+      const polyFeatures = (fc.features || []).filter(
+        (f) => f && f.geometry && (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon')
+      )
+      if (polyFeatures.length === 0) {
+        throw new Error('No Polygon or MultiPolygon geometries found in reference file.')
+      }
+      setReferenceData(fc)
+      setReferenceSource({ name: file.name, isSample: false, count: polyFeatures.length })
+    } catch (err) {
+      setReferenceError(err.message || 'Failed to load reference file.')
+    }
+  }, [])
+
+  const handleLoadSampleReference = useCallback(async () => {
+    try {
+      setReferenceError(null)
+      const res = await fetch(`data/${sceneId}/reference_buildings.geojson`)
+      if (!res.ok) {
+        throw new Error(`Sample reference data not available for scene "${sceneId}".`)
+      }
+      const fc = await res.json()
+      const polyFeatures = (fc.features || []).filter(
+        (f) => f && f.geometry && (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon')
+      )
+      setReferenceData(fc)
+      setReferenceSource({
+        name: 'village_tiled_reference_buildings.geojson',
+        isSample: true,
+        count: polyFeatures.length,
+      })
+    } catch (err) {
+      setReferenceError(err.message || 'Could not load sample reference data.')
+    }
+  }, [sceneId])
+
+  const handleClearReference = useCallback(() => {
+    setReferenceData(null)
+    setReferenceSource(null)
+    setReferenceError(null)
+  }, [])
 
   const timers = useRef([])
   const stageRef = useRef(null)
@@ -648,6 +732,17 @@ export default function App() {
   if (error) return <div className="boot"><h1>Dhara.ai</h1><p>{error}</p></div>
   if (!scene || !parcels) return <div className="boot"><h1>Dhara.ai</h1><p>Loading scene…</p></div>
 
+  // Reference mode takes over the entire stage
+  if (refMode) {
+    return (
+      <ReferenceMode
+        scene={scene}
+        parcels={parcels}
+        onExit={() => setRefMode(false)}
+      />
+    )
+  }
+
   const m = scene.manifest
   const appClasses = ['app', !leftOpen ? 'no-left' : '', !rightOpen ? 'no-right' : ''].filter(Boolean).join(' ')
 
@@ -860,6 +955,7 @@ export default function App() {
           fitNonce={fitNonce}
           compareActive={compareActive}
           comparePos={comparePos}
+          groundTruthResult={groundTruthResult}
         />
 
         {scanNonce > 0 && <div key={scanNonce} className="scan" aria-hidden="true" />}
@@ -944,6 +1040,19 @@ export default function App() {
             <span>Compare</span>
           </button>
 
+          <button
+            type="button"
+            className="tool-btn"
+            onClick={() => setRefMode(true)}
+            title="Reference mode: draw ground-truth building polygons"
+            aria-label="Enter reference mode"
+          >
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+            </svg>
+            <span>Reference</span>
+          </button>
+
           {styleMode !== 'status' && (
             <div className="fill-controls">
               <label className="fill-check">
@@ -1004,6 +1113,14 @@ export default function App() {
           onBulkApproveOpen={() => setBulkConfirmOpen(true)}
           bulkUndoState={bulkUndoState}
           onUndoBulk={undoBulkApprove}
+          groundTruthResult={groundTruthResult}
+          referenceSource={referenceSource}
+          referenceError={referenceError}
+          onLoadReferenceFile={handleLoadReferenceFile}
+          onLoadSampleReference={handleLoadSampleReference}
+          onClearReference={handleClearReference}
+          hasSampleReference={sceneId === 'village_tiled'}
+          sceneId={sceneId}
         />
       )}
 

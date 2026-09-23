@@ -83,7 +83,7 @@ Acceptance: pack the village scene, import it into a fresh browser profile, and 
 
 ---
 
-## [ ] Task 6 - Ground-truth check in the app
+## [x] Task 6 - Ground-truth check in the app
 Needs from me: a GeoJSON of hand-digitised buildings (20-30 is enough) for one scene. Ask me for it before starting.
 Steps
 1. "Load reference polygons" in the Report tab (GeoJSON, WGS84).

@@ -13,3 +13,7 @@ data/processed/*/tiles/
 .DS_Store
 models/
 labels/
+
+# Temporary reference mode (ground-truth digitisation tool, not part of the product)
+frontend/src/components/ReferenceMode.jsx
+*_reference_buildings.geojson
