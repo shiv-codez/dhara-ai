@@ -32,7 +32,7 @@ test('hoverController: 50 rapid mouseovers without mouseout keeps at most 1 high
     const id = feature.properties.parcel_id
     styleStates.set(id, isHovered)
     return {
-      color: isHovered ? '#0052CC' : '#C8402B',
+      color: isHovered ? '#4A2E44' : '#C8402B',
       weight: isHovered ? 2.4 : 1.3,
     }
   }

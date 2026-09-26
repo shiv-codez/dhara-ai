@@ -3,7 +3,10 @@ import MapView from './components/MapView.jsx'
 import StepRail from './components/StepRail.jsx'
 import RightPanel, { sortQueueFeatures } from './components/RightPanel.jsx'
 import Legend from './components/Legend.jsx'
+import TableView from './components/TableView.jsx'
+import OnboardingHint from './components/OnboardingHint.jsx'
 import { STEPS, STATUS } from './lib/steps.js'
+import { translate } from './lib/i18n.js'
 import {
   loadIndex,
   loadScene,
@@ -21,13 +24,13 @@ import { computeMetrics } from './lib/metrics.js'
 
 const STEP_MS = 2600
 
-function ImportErrorModal({ error, onClose }) {
+function ImportErrorModal({ error, onClose, lang = 'en' }) {
   if (!error) return null
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="import-err-title">
       <div className="modal-box import-error-box">
         <div className="modal-head">
-          <h3 id="import-err-title">Could not open results archive</h3>
+          <h3 id="import-err-title">{translate('import_err_title', lang)}</h3>
         </div>
         <div className="modal-body">
           <p className="import-err-msg">{error}</p>
@@ -42,7 +45,7 @@ function ImportErrorModal({ error, onClose }) {
         </div>
         <div className="modal-actions">
           <button type="button" className="btn primary" onClick={onClose}>
-            Dismiss
+            {translate('dismiss', lang)}
           </button>
         </div>
       </div>
@@ -50,28 +53,28 @@ function ImportErrorModal({ error, onClose }) {
   )
 }
 
-function BulkConfirmModal({ count, onConfirm, onCancel }) {
+function BulkConfirmModal({ count, onConfirm, onCancel, lang = 'en' }) {
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="bulk-modal-title">
       <div className="modal-box">
-        <h3 id="bulk-modal-title">Bulk approve Low priority parcels</h3>
+        <h3 id="bulk-modal-title">{translate('bulk_modal_title', lang)}</h3>
         <p className="lead">
-          Approve <b>{count}</b> candidate {count === 1 ? 'parcel' : 'parcels'} currently in Draft.
+          {translate('bulk_modal_lead', lang, { count, parcels: count === 1 ? translate('plot', lang) : translate('candidate_parcels', lang) })}
         </p>
         <div className="callout info">
           <p>
-            These parcels will be marked as <b>Approved</b> candidates (unreviewed, <code>decided_by: "bulk"</code>).
+            {translate('bulk_modal_desc1', lang)}
           </p>
           <p className="fine">
-            Only parcels with priority <b>Low</b> (no high vegetation share, no dark earth classification flags, and no topology issues) and status <b>Draft</b> will be updated. Already reviewed parcels are preserved.
+            {translate('bulk_modal_desc2', lang)}
           </p>
         </div>
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onCancel}>
-            Cancel
+            {translate('cancel', lang)}
           </button>
           <button type="button" className="btn ok" disabled={count === 0} onClick={onConfirm}>
-            Approve {count} {count === 1 ? 'parcel' : 'parcels'}
+            {translate('approve', lang)} {count} {count === 1 ? translate('plot', lang) : translate('candidate_parcels', lang)}
           </button>
         </div>
       </div>
@@ -79,7 +82,7 @@ function BulkConfirmModal({ count, onConfirm, onCancel }) {
   )
 }
 
-function CompareSliderOverlay({ pos, onChange, stageRef }) {
+function CompareSliderOverlay({ pos, onChange, stageRef, lang = 'en' }) {
   const isDragging = useRef(false)
 
   const handlePointerDown = (e) => {
@@ -115,14 +118,14 @@ function CompareSliderOverlay({ pos, onChange, stageRef }) {
         style={{ left: `${pos}%` }}
         onPointerDown={handlePointerDown}
       >
-        <div className="compare-handle" aria-label="Drag compare slider" title="Drag to compare raw orthomosaic and detections">
+        <div className="compare-handle" aria-label="Drag compare slider" title={translate('compare_title', lang)}>
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5">
             <path d="M8 7l-5 5 5 5M16 7l5 5-5 5" />
           </svg>
         </div>
       </div>
-      <span className="compare-badge left">Raw image</span>
-      <span className="compare-badge right">Dhara.ai detections</span>
+      <span className="compare-badge left">{translate('raw_image', lang)}</span>
+      <span className="compare-badge right">{translate('detections_layer', lang)}</span>
     </div>
   )
 }
@@ -133,6 +136,25 @@ export default function App() {
   const [scene, setScene] = useState(null)
   const [error, setError] = useState(null)
 
+  // Language Localization State (Task 9.1)
+  const [lang, setLang] = useState(() => {
+    try {
+      return localStorage.getItem('dhara:v1:lang') || 'en'
+    } catch {
+      return 'en'
+    }
+  })
+
+  const handleSetLang = (newLang) => {
+    setLang(newLang)
+    try {
+      localStorage.setItem('dhara:v1:lang', newLang)
+    } catch {}
+  }
+
+  // View Mode: 'map' or 'table' (Task 9.2)
+  const [viewMode, setViewMode] = useState('map')
+
   const [stepIdx, setStepIdx] = useState(0)
   const [vis, setVis] = useState(STEPS[0].vis)
   const [regMode, setRegMode] = useState('clean')
@@ -140,8 +162,8 @@ export default function App() {
   const [playing, setPlaying] = useState(false)
   const [scanNonce, setScanNonce] = useState(0)
 
-  // Layout & Styling Controls
-  const [leftOpen, setLeftOpen] = useState(true)
+  // Layout & Styling Controls (Step rail collapsed by default to maximize GIS workspace)
+  const [leftOpen, setLeftOpen] = useState(false)
   const [rightOpen, setRightOpen] = useState(true)
   const [fillEnabled, setFillEnabled] = useState(false)
   const [fillOpacity, setFillOpacity] = useState(0.35)
@@ -161,6 +183,7 @@ export default function App() {
   const [overlaps, setOverlaps] = useState([])
   const [tab, setTab] = useState('parcel')
   const [focus, setFocus] = useState(null)
+  const [inspectTarget, setInspectTarget] = useState(null)
   const [menuOpen, setMenuOpen] = useState(false)
 
   // Bulk Actions
@@ -473,12 +496,16 @@ export default function App() {
     log(id, `${statusLabel}${note ? ` - ${note}` : ''}`, decidedBy)
   }, [log])
 
-  const select = useCallback((id) => {
+  const select = useCallback((id, opts = {}) => {
     if (editingId && id !== editingId) finishEdit()
-    setSelectedId(id)
-    if (id) {
+    const parcelId = typeof id === 'object' ? (id?.properties?.parcel_id || id?.id) : id
+    setSelectedId(parcelId)
+    if (parcelId) {
       setTab('parcel')
       if (!rightOpen) setRightOpen(true)
+    }
+    if (opts?.inspect && parcelId) {
+      setInspectTarget({ id: parcelId, nonce: Date.now() })
     }
   }, [editingId, rightOpen])
 
@@ -749,18 +776,18 @@ export default function App() {
 
         <div className="brand">
           <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
-            <rect width="32" height="32" rx="7" fill="#12233F" />
-            <path d="M7 9h11l7 5v9H7z" fill="none" stroke="#F2F5F9" strokeWidth="2" strokeLinejoin="round" />
+            <rect width="32" height="32" rx="7" fill="#4A2E44" />
+            <path d="M7 9h11l7 5v9H7z" fill="none" stroke="#F5F4F1" strokeWidth="2" strokeLinejoin="round" />
             <path d="M7 16h18M16 9v14" stroke="#E2566B" strokeWidth="2" />
           </svg>
           <div>
             <h1>Dhara.ai</h1>
-            <p>Drone imagery to candidate parcel maps</p>
+            <p>{translate('tagline', lang)}</p>
           </div>
         </div>
 
         <label className="scene-pick">
-          <span className="sr">Scene</span>
+          <span className="sr">{translate('scene', lang)}</span>
           <select value={sceneId} onChange={(e) => { stop(); setSceneId(e.target.value) }}>
             {allSceneOptions.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
           </select>
@@ -770,12 +797,12 @@ export default function App() {
           type="button"
           className="btn open-results-btn"
           onClick={() => fileInputRef.current?.click()}
-          title="Open packed results ZIP (or drop anywhere)"
+          title={translate('open_results_title', lang)}
         >
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5-5 5 5M12 5v12" />
           </svg>
-          Open results
+          {translate('open_results', lang)}
         </button>
         <input
           ref={fileInputRef}
@@ -790,43 +817,74 @@ export default function App() {
           }}
         />
 
+        {/* View Mode Switcher (Map vs Table & Dashboard) */}
+        <div className="view-mode-toggle" role="group" aria-label="View mode">
+          <button
+            type="button"
+            className={`view-mode-btn ${viewMode === 'map' ? 'active' : ''}`}
+            onClick={() => setViewMode('map')}
+          >
+            🗺️ {translate('view_map', lang)}
+          </button>
+          <button
+            type="button"
+            className={`view-mode-btn ${viewMode === 'table' ? 'active' : ''}`}
+            onClick={() => setViewMode('table')}
+          >
+            📊 {translate('view_table', lang)}
+          </button>
+        </div>
+
         {/* Live Officer Header Progress */}
         <div className="header-progress" aria-label="Review progress">
           <div className="progress-summary">
-            <span className="progress-label">Reviewed <b>{reviewed}</b>/{total}</span>
-            <span className="progress-badge approved" title={`${approved} approved`}>
-              <span className="dot-mini" /> <b>{approved}</b> approved
-            </span>
-            <span className="progress-badge flagged" title={`${flagged} field check`}>
-              <span className="dot-mini" /> <b>{flagged}</b> field check
-            </span>
-            <span className="progress-badge rejected" title={`${rejected} rejected`}>
-              <span className="dot-mini" /> <b>{rejected}</b> rejected
+            <span className="progress-label font-mono">
+              {translate('reviewed_progress', lang)} <b>{reviewed}</b>/{total} ({total > 0 ? Math.round((reviewed / total) * 100) : 0}%)
             </span>
           </div>
           <div className="multi-progress-bar" role="progressbar" aria-valuenow={reviewed} aria-valuemin="0" aria-valuemax={total}>
-            <span className="bar-approved" style={{ width: `${(approved / Math.max(total, 1)) * 100}%` }} />
-            <span className="bar-flagged" style={{ width: `${(flagged / Math.max(total, 1)) * 100}%` }} />
-            <span className="bar-rejected" style={{ width: `${(rejected / Math.max(total, 1)) * 100}%` }} />
+            <span className="bar-approved" title={`${approved} approved`} style={{ width: `${(approved / Math.max(total, 1)) * 100}%` }} />
+            <span className="bar-flagged" title={`${flagged} flagged`} style={{ width: `${(flagged / Math.max(total, 1)) * 100}%` }} />
+            <span className="bar-rejected" title={`${rejected} rejected`} style={{ width: `${(rejected / Math.max(total, 1)) * 100}%` }} />
           </div>
         </div>
 
         <div className="top-right">
+          {/* Language Toggle */}
+          <div className="lang-toggle-group" role="group" aria-label={translate('lang_toggle_title', lang)}>
+            <button
+              type="button"
+              className={`lang-btn ${lang === 'en' ? 'active' : ''}`}
+              onClick={() => handleSetLang('en')}
+              title="English"
+            >
+              EN
+            </button>
+            <button
+              type="button"
+              className={`lang-btn ${lang === 'hi' ? 'active' : ''}`}
+              onClick={() => handleSetLang('hi')}
+              title="हिंदी (Hindi)"
+            >
+              हि
+            </button>
+          </div>
+
           {m.georef_source === 'assumed_demo' && (
-            <span className="chip" title="Demo image without survey metadata">
-              Assumed georeference
+            <span className="chip" title={translate('assumed_georef_title', lang)}>
+              {translate('assumed_georef', lang)}
             </span>
           )}
-          <span className="chip draft">All parcels: draft, pending officer review</span>
+          <span className="chip draft">{translate('all_draft_chip', lang)}</span>
           <div className="menu">
             <button
               type="button"
-              className="btn"
+              className="btn primary export-btn"
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               onClick={() => setMenuOpen((o) => !o)}
             >
-              Export
+              {translate('export', lang)}
             </button>
             {menuOpen && (
               <div className="menu-list" role="menu" onMouseLeave={() => setMenuOpen(false)}>
@@ -838,7 +896,7 @@ export default function App() {
                     setMenuOpen(false)
                   }}
                 >
-                  Approved parcels (GeoJSON)
+                  {translate('export_approved', lang)}
                 </button>
                 <button
                   type="button"
@@ -848,10 +906,10 @@ export default function App() {
                     setMenuOpen(false)
                   }}
                 >
-                  All candidate parcels (GeoJSON)
+                  {translate('export_all', lang)}
                 </button>
                 <a role="menuitem" href={scene.urls.gpkg} download onClick={() => setMenuOpen(false)}>
-                  GeoPackage for QGIS / ArcGIS
+                  {translate('export_gpkg', lang)}
                 </a>
                 <button
                   type="button"
@@ -861,7 +919,7 @@ export default function App() {
                     setMenuOpen(false)
                   }}
                 >
-                  Review audit log (JSON)
+                  {translate('export_audit', lang)}
                 </button>
                 <button
                   type="button"
@@ -871,7 +929,7 @@ export default function App() {
                     setMenuOpen(false)
                   }}
                 >
-                  Review labels (JSON)
+                  {translate('export_labels', lang)}
                 </button>
                 <button
                   type="button"
@@ -882,7 +940,7 @@ export default function App() {
                     setMenuOpen(false)
                   }}
                 >
-                  Discard my edits and decisions
+                  {translate('discard_edits', lang)}
                 </button>
               </div>
             )}
@@ -902,199 +960,221 @@ export default function App() {
         </div>
       </header>
 
-      {leftOpen && (
-        <StepRail
-          stepIdx={stepIdx}
-          onStep={manualStep}
-          playing={playing}
-          onPlay={play}
-          onStop={stop}
-          vis={vis}
-          onToggleLayer={(k) => setVis((v) => ({ ...v, [k]: !v[k] }))}
-          regMode={regMode}
-          onRegMode={setRegMode}
-          fixMode={fixMode}
-          onFixMode={setFixMode}
-          manifest={m}
-        />
-      )}
+      <StepRail
+        stepIdx={stepIdx}
+        onStep={manualStep}
+        playing={playing}
+        onPlay={play}
+        onStop={stop}
+        vis={vis}
+        onToggleLayer={(k) => setVis((v) => ({ ...v, [k]: !v[k] }))}
+        regMode={regMode}
+        onRegMode={setRegMode}
+        fixMode={fixMode}
+        onFixMode={setFixMode}
+        manifest={m}
+        lang={lang}
+      />
 
       <main ref={stageRef} className="stage">
-        <MapView
-          scene={scene}
-          vis={vis}
-          regMode={regMode}
-          fixMode={fixMode}
-          styleMode={styleMode}
-          parcels={parcels}
-          rebuildKey={rebuildKey}
-          statuses={statuses}
-          selectedId={selectedId}
-          onSelect={select}
-          editingId={editingId}
-          onGeometryEdit={onGeometryEdit}
-          overlaps={overlaps}
-          focus={focus}
-          fillEnabled={fillEnabled}
-          fillOpacity={fillOpacity}
-          fitNonce={fitNonce}
-          compareActive={compareActive}
-          comparePos={comparePos}
-          groundTruthResult={groundTruthResult}
-        />
+        {/* Dismissible Onboarding Guide (Task 9.3) */}
+        <OnboardingHint lang={lang} />
 
-        {scanNonce > 0 && <div key={scanNonce} className="scan" aria-hidden="true" />}
+        {/* Crossfade View Transition Container */}
+        <div className={`view-pane table-pane ${viewMode === 'table' ? 'active' : 'hidden'}`}>
+          <TableView
+            parcelsGeoJSON={parcels}
+            statuses={statuses}
+            selectedId={selectedId}
+            selectedFeature={parcel}
+            onSelectParcel={select}
+            onDecide={setStatus}
+            lang={lang}
+            onSwitchToMap={() => setViewMode('map')}
+          />
+        </div>
 
-        {/* Invalidation Banner when map data was regenerated */}
-        {invalidationBanner && (
-          <div className="invalidation-banner" role="alert">
-            <div className="invalidation-banner-content">
-              <span className="banner-icon" aria-hidden="true">⚠️</span>
-              <span className="banner-text">
-                The map data for this scene was regenerated, so {invalidationBanner.count} earlier {invalidationBanner.count === 1 ? 'decision was' : 'decisions were'} set aside.
-              </span>
+        <div className={`view-pane map-pane ${viewMode === 'map' ? 'active' : 'hidden'}`}>
+          <MapView
+            scene={scene}
+            vis={vis}
+            regMode={regMode}
+            fixMode={fixMode}
+            styleMode={styleMode}
+            parcels={parcels}
+            rebuildKey={rebuildKey}
+            statuses={statuses}
+            selectedId={selectedId}
+            onSelect={select}
+            editingId={editingId}
+            onGeometryEdit={onGeometryEdit}
+            overlaps={overlaps}
+            focus={focus}
+            inspectTarget={inspectTarget}
+            fillEnabled={fillEnabled}
+            fillOpacity={fillOpacity}
+            fitNonce={fitNonce}
+            compareActive={compareActive}
+            comparePos={comparePos}
+            groundTruthResult={groundTruthResult}
+          />
+
+          {scanNonce > 0 && <div key={scanNonce} className="scan" aria-hidden="true" />}
+
+          {/* Invalidation Banner when map data was regenerated */}
+          {invalidationBanner && (
+            <div className="invalidation-banner" role="alert">
+              <div className="invalidation-banner-content">
+                <span className="banner-icon" aria-hidden="true">⚠️</span>
+                <span className="banner-text">
+                  {translate('invalidation_msg', lang, {
+                    count: invalidationBanner.count,
+                    decisions: invalidationBanner.count === 1 ? 'decision was' : 'decisions were',
+                  })}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-sm banner-action-btn"
+                  onClick={() => {
+                    download(
+                      `${invalidationBanner.sceneId}_old_review_labels.json`,
+                      exportLabelsFromBackup(
+                        invalidationBanner.sceneId,
+                        invalidationBanner.backupData,
+                        scene?.data?.parcels
+                      ),
+                      'application/json'
+                    )
+                  }}
+                >
+                  {translate('export_old_labels', lang)}
+                </button>
+              </div>
               <button
                 type="button"
-                className="btn btn-sm banner-action-btn"
-                onClick={() => {
-                  download(
-                    `${invalidationBanner.sceneId}_old_review_labels.json`,
-                    exportLabelsFromBackup(
-                      invalidationBanner.sceneId,
-                      invalidationBanner.backupData,
-                      scene?.data?.parcels
-                    ),
-                    'application/json'
-                  )
-                }}
+                className="banner-close-btn"
+                onClick={() => setInvalidationBanner(null)}
+                aria-label="Dismiss banner"
+                title="Dismiss notification"
               >
-                Export old review labels
+                ✕
               </button>
             </div>
+          )}
+
+          {/* Compare Swipe Slider Overlay */}
+          {compareActive && (
+            <CompareSliderOverlay
+              pos={comparePos}
+              onChange={setComparePos}
+              stageRef={stageRef}
+              lang={lang}
+            />
+          )}
+
+          {/* Stage Floating Controls */}
+          <div className="stage-tag">
+            <b>{STEPS[stepIdx].title}</b>
+            <span>{stepIdx + 1} {translate('step_progress_of', lang)} {STEPS.length}</span>
+          </div>
+
+          <div className="map-toolbar" role="toolbar" aria-label="Map display controls">
             <button
               type="button"
-              className="banner-close-btn"
-              onClick={() => setInvalidationBanner(null)}
-              aria-label="Dismiss banner"
-              title="Dismiss notification"
+              className="tool-btn"
+              onClick={() => setFitNonce((n) => n + 1)}
+              title={translate('fit_view_title', lang)}
+              aria-label={translate('fit_view_title', lang)}
             >
-              ✕
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M3 9V3h6M15 3h6v6M21 15v6h-6M9 21H3v-6" />
+              </svg>
+              <span>{translate('fit_view', lang)}</span>
             </button>
-          </div>
-        )}
 
-        {/* Compare Swipe Slider Overlay */}
-        {compareActive && (
-          <CompareSliderOverlay
-            pos={comparePos}
-            onChange={setComparePos}
-            stageRef={stageRef}
-          />
-        )}
+            <button
+              type="button"
+              className={`tool-btn ${compareActive ? 'active' : ''}`}
+              onClick={() => setCompareActive((c) => !c)}
+              title={translate('compare_title', lang)}
+              aria-label={translate('compare_title', lang)}
+            >
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 3v18M8 8l-4 4 4 4M16 8l4 4-4 4" />
+              </svg>
+              <span>{translate('compare', lang)}</span>
+            </button>
 
-        {/* Stage Floating Controls */}
-        <div className="stage-tag">
-          <b>{STEPS[stepIdx].title}</b>
-          <span>{stepIdx + 1} of {STEPS.length}</span>
-        </div>
-
-        <div className="map-toolbar" role="toolbar" aria-label="Map display controls">
-          <button
-            type="button"
-            className="tool-btn"
-            onClick={() => setFitNonce((n) => n + 1)}
-            title="Fit view to scene extent"
-            aria-label="Fit view to scene extent"
-          >
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 9V3h6M15 3h6v6M21 15v6h-6M9 21H3v-6" />
-            </svg>
-            <span>Fit view</span>
-          </button>
-
-          <button
-            type="button"
-            className={`tool-btn ${compareActive ? 'active' : ''}`}
-            onClick={() => setCompareActive((c) => !c)}
-            title="Compare raw orthomosaic with candidate layers (swipe)"
-            aria-label="Compare raw orthomosaic with candidate layers"
-          >
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 3v18M8 8l-4 4 4 4M16 8l4 4-4 4" />
-            </svg>
-            <span>Compare</span>
-          </button>
-
-          {styleMode !== 'status' && (
-            <div className="fill-controls">
-              <label className="fill-check">
-                <input
-                  type="checkbox"
-                  checked={fillEnabled}
-                  onChange={(e) => setFillEnabled(e.target.checked)}
-                />
-                <span>Fill</span>
-              </label>
-
-              {fillEnabled && (
-                <label className="opacity-slider" title="Fill opacity">
+            {styleMode !== 'status' && (
+              <div className="fill-controls">
+                <label className="fill-check">
                   <input
-                    type="range"
-                    min="0.10"
-                    max="0.85"
-                    step="0.05"
-                    value={fillOpacity}
-                    onChange={(e) => setFillOpacity(parseFloat(e.target.value))}
-                    aria-label="Parcel fill opacity"
+                    type="checkbox"
+                    checked={fillEnabled}
+                    onChange={(e) => setFillEnabled(e.target.checked)}
                   />
-                  <span>{Math.round(fillOpacity * 100)}%</span>
+                  <span>{translate('fill', lang)}</span>
                 </label>
-              )}
-            </div>
-          )}
-        </div>
 
-        <Legend vis={vis} styleMode={styleMode} fillEnabled={fillEnabled} />
+                {fillEnabled && (
+                  <label className="opacity-slider" title={translate('opacity', lang)}>
+                    <input
+                      type="range"
+                      min="0.10"
+                      max="0.85"
+                      step="0.05"
+                      value={fillOpacity}
+                      onChange={(e) => setFillOpacity(parseFloat(e.target.value))}
+                      aria-label="Parcel fill opacity"
+                    />
+                    <span>{Math.round(fillOpacity * 100)}%</span>
+                  </label>
+                )}
+              </div>
+            )}
+          </div>
+
+          <Legend vis={vis} styleMode={styleMode} fillEnabled={fillEnabled} lang={lang} />
+        </div>
       </main>
 
-      {rightOpen && (
-        <RightPanel
-          tab={tab}
-          onTab={setTab}
-          manifest={m}
-          parcels={parcels}
-          parcel={parcel}
-          statuses={statuses}
-          onStatus={setStatus}
-          audit={audit}
-          issues={issues}
-          fixMode={fixMode}
-          onFocus={(b) => setFocus({ bounds: b, nonce: Date.now() })}
-          editing={!!editingId}
-          onEditStart={startEdit}
-          onEditDone={finishEdit}
-          overlaps={overlaps}
-          onResolve={resolve}
-          reviewed={reviewed}
-          approved={approved}
-          flagged={flagged}
-          rejected={rejected}
-          total={total}
-          onSelect={select}
-          onNextInQueue={goToNextInQueue}
-          onBulkApproveOpen={() => setBulkConfirmOpen(true)}
-          bulkUndoState={bulkUndoState}
-          onUndoBulk={undoBulkApprove}
-          groundTruthResult={groundTruthResult}
-          referenceSource={referenceSource}
-          referenceError={referenceError}
-          onLoadReferenceFile={handleLoadReferenceFile}
-          onLoadSampleReference={handleLoadSampleReference}
-          onClearReference={handleClearReference}
-          hasSampleReference={sceneId === 'village_tiled'}
-          sceneId={sceneId}
-        />
-      )}
+      <RightPanel
+        tab={tab}
+        onTab={setTab}
+        manifest={m}
+        parcels={parcels}
+        parcel={parcel}
+        statuses={statuses}
+        onStatus={setStatus}
+        audit={audit}
+        issues={issues}
+        fixMode={fixMode}
+        onFocus={(b) => setFocus({ bounds: b, nonce: Date.now() })}
+        editing={!!editingId}
+        onEditStart={startEdit}
+        onEditDone={finishEdit}
+        overlaps={overlaps}
+        onResolve={resolve}
+        reviewed={reviewed}
+        approved={approved}
+        flagged={flagged}
+        rejected={rejected}
+        total={total}
+        onSelect={select}
+        onNextInQueue={goToNextInQueue}
+        onBulkApproveOpen={() => setBulkConfirmOpen(true)}
+        bulkUndoState={bulkUndoState}
+        onUndoBulk={undoBulkApprove}
+        groundTruthResult={groundTruthResult}
+        referenceSource={referenceSource}
+        referenceError={referenceError}
+        onLoadReferenceFile={handleLoadReferenceFile}
+        onLoadSampleReference={handleLoadSampleReference}
+        onClearReference={handleClearReference}
+        hasSampleReference={sceneId === 'village_tiled'}
+        sceneId={sceneId}
+        lang={lang}
+      />
 
       {/* Bulk Approval Confirmation Modal */}
       {bulkConfirmOpen && (
@@ -1105,6 +1185,7 @@ export default function App() {
             setBulkConfirmOpen(false)
           }}
           onCancel={() => setBulkConfirmOpen(false)}
+          lang={lang}
         />
       )}
 
@@ -1115,14 +1196,14 @@ export default function App() {
             <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5-5 5 5M12 5v12" />
             </svg>
-            <h3>Drop results ZIP here</h3>
-            <p>Load candidate layers and orthomosaic into Dhara.ai</p>
+            <h3>{translate('dropzone_title', lang)}</h3>
+            <p>{translate('dropzone_desc', lang)}</p>
           </div>
         </div>
       )}
 
       {/* Import Error Modal */}
-      <ImportErrorModal error={importError} onClose={() => setImportError(null)} />
+      <ImportErrorModal error={importError} onClose={() => setImportError(null)} lang={lang} />
     </div>
   )
 }

@@ -112,7 +112,7 @@ Try, in a Colab notebook, combining a pretrained aerial building-segmentation mo
 
 ---
 
-## [ ] Task 9 - Polish for the submission
+## [x] Task 9 - Polish for the submission
 1. English / Hindi UI toggle (interface strings only; keep numbers and IDs unchanged). Mukta already covers Devanagari.
 2. Table / dashboard view: sortable parcel table (id, area, land use, priority, status), summary counts, area distribution.
 3. First-visit hint (three short lines: play, select a parcel, review) that can be dismissed and is not shown again.

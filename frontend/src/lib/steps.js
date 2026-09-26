@@ -78,10 +78,10 @@ export const LANDUSE_TINT = {
 }
 
 export const STATUS = {
-  draft: { label: 'Draft / Unverified', color: '#8593A8' },
-  approved: { label: 'Approved', color: '#1E8E5A' },
-  flagged: { label: 'Needs field check', color: '#E8A317' },
-  rejected: { label: 'Rejected', color: '#C8402B' },
+  draft: { label: 'Draft / Unverified', color: '#8C877D' },
+  approved: { label: 'Approved', color: '#3F6B4F' },
+  flagged: { label: 'Needs field check', color: '#A6752C' },
+  rejected: { label: 'Rejected', color: '#9B4234' },
 }
 
 export const ISSUE_LABEL = {

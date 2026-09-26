@@ -1,21 +1,39 @@
 import { useState } from 'react'
-import { STATUS, LANDUSE_TINT, ISSUE_LABEL } from '../lib/steps.js'
+import { STATUS, LANDUSE_TINT } from '../lib/steps.js'
+import { translate } from '../lib/i18n.js'
 
-const CLASS_MASKS = [
-  { label: 'Building', color: '#E2566B' },
-  { label: 'Road corridor', color: '#2563C9' },
-  { label: 'Vegetation', color: '#2F8F55' },
-  { label: 'Open ground', color: '#D4A373' },
-]
-
-const TOPO_COLORS = [
-  { label: 'Error', color: '#D62839' },
-  { label: 'Warning', color: '#E8A317' },
-  { label: 'Info', color: '#4C6EF5' },
-]
-
-export default function Legend({ vis, styleMode, fillEnabled }) {
+export default function Legend({ vis, styleMode, fillEnabled, lang = 'en' }) {
   const [collapsed, setCollapsed] = useState(false)
+
+  const classMasks = [
+    { label: translate('class_building', lang), color: '#E2566B' },
+    { label: translate('class_road', lang), color: '#2563C9' },
+    { label: translate('class_vegetation', lang), color: '#2F8F55' },
+    { label: translate('class_open_ground', lang), color: '#D4A373' },
+  ]
+
+  const topoColors = [
+    { label: translate('topo_error', lang), color: '#D62839' },
+    { label: translate('topo_warning', lang), color: '#E8A317' },
+    { label: translate('topo_info', lang), color: '#4C6EF5' },
+  ]
+
+  function getStatusLabel(k) {
+    if (k === 'approved') return translate('status_approved', lang)
+    if (k === 'flagged') return translate('status_flagged', lang)
+    if (k === 'rejected') return translate('status_rejected', lang)
+    return translate('status_draft', lang)
+  }
+
+  function getLanduseLabel(lu) {
+    if (!lu) return '—'
+    const lower = String(lu).toLowerCase()
+    if (lower.includes('low')) return translate('landuse_builtup_low', lang)
+    if (lower.includes('built')) return translate('landuse_builtup', lang)
+    if (lower.includes('veg')) return translate('landuse_veg', lang)
+    if (lower.includes('vacant') || lower.includes('open')) return translate('landuse_vacant', lang)
+    return lu
+  }
 
   // Determine which sections are active
   const showMasks = !!vis.masks
@@ -30,9 +48,9 @@ export default function Legend({ vis, styleMode, fillEnabled }) {
   if (!hasAny) return null
 
   return (
-    <div className={`map-legend ${collapsed ? 'is-collapsed' : ''}`} aria-label="Map legend">
+    <div className={`map-legend ${collapsed ? 'is-collapsed' : ''}`} aria-label={translate('legend', lang)}>
       <div className="legend-head" onClick={() => setCollapsed(!collapsed)} role="button" tabIndex={0}>
-        <b>Legend</b>
+        <b>{translate('legend', lang)}</b>
         <button className="legend-toggle-btn" aria-label={collapsed ? 'Expand legend' : 'Collapse legend'}>
           {collapsed ? '▴' : '▾'}
         </button>
@@ -42,9 +60,9 @@ export default function Legend({ vis, styleMode, fillEnabled }) {
         <div className="legend-body">
           {showMasks && (
             <div className="legend-sec">
-              <span className="legend-sec-title">Class masks</span>
+              <span className="legend-sec-title">{translate('class_masks', lang)}</span>
               <ul>
-                {CLASS_MASKS.map((c) => (
+                {classMasks.map((c) => (
                   <li key={c.label}>
                     <i style={{ background: c.color }} />
                     <span>{c.label}</span>
@@ -57,27 +75,31 @@ export default function Legend({ vis, styleMode, fillEnabled }) {
           {showParcels && (
             <div className="legend-sec">
               <span className="legend-sec-title">
-                {styleMode === 'status' ? 'Parcel review status' : fillEnabled ? 'Land use (rule-based)' : 'Parcels'}
+                {styleMode === 'status'
+                  ? translate('parcel_review_status', lang)
+                  : fillEnabled
+                  ? translate('landuse_rule_based', lang)
+                  : translate('layer_parcels', lang)}
               </span>
               <ul>
                 {styleMode === 'status' ? (
                   Object.entries(STATUS).map(([k, v]) => (
                     <li key={k}>
                       <i style={{ background: v.color }} />
-                      <span>{v.label}</span>
+                      <span>{getStatusLabel(k)}</span>
                     </li>
                   ))
                 ) : fillEnabled ? (
                   Object.entries(LANDUSE_TINT).map(([k, color]) => (
                     <li key={k}>
                       <i style={{ background: color }} />
-                      <span>{k}</span>
+                      <span>{getLanduseLabel(k)}</span>
                     </li>
                   ))
                 ) : (
                   <li>
                     <i style={{ background: 'transparent', border: '2px solid #C8402B' }} />
-                    <span>Candidate boundary</span>
+                    <span>{translate('candidate_boundary', lang)}</span>
                   </li>
                 )}
               </ul>
@@ -86,9 +108,9 @@ export default function Legend({ vis, styleMode, fillEnabled }) {
 
           {showIssues && (
             <div className="legend-sec">
-              <span className="legend-sec-title">Topology flags</span>
+              <span className="legend-sec-title">{translate('topology_flags', lang)}</span>
               <ul>
-                {TOPO_COLORS.map((t) => (
+                {topoColors.map((t) => (
                   <li key={t.label}>
                     <i style={{ background: t.color, borderRadius: '50%' }} />
                     <span>{t.label}</span>
@@ -103,7 +125,7 @@ export default function Legend({ vis, styleMode, fillEnabled }) {
               <ul>
                 <li>
                   <i style={{ background: '#E2566B', border: '1px solid #C8402B' }} />
-                  <span>Building footprints</span>
+                  <span>{translate('layer_buildings', lang)}</span>
                 </li>
               </ul>
             </div>
@@ -114,7 +136,7 @@ export default function Legend({ vis, styleMode, fillEnabled }) {
               <ul>
                 <li>
                   <i style={{ background: '#2563C9' }} />
-                  <span>Road corridors</span>
+                  <span>{translate('layer_roads', lang)}</span>
                 </li>
               </ul>
             </div>
@@ -125,7 +147,7 @@ export default function Legend({ vis, styleMode, fillEnabled }) {
               <ul>
                 <li>
                   <i style={{ background: '#2F8F55' }} />
-                  <span>Vegetation</span>
+                  <span>{translate('layer_vegetation', lang)}</span>
                 </li>
               </ul>
             </div>
@@ -136,7 +158,7 @@ export default function Legend({ vis, styleMode, fillEnabled }) {
               <ul>
                 <li>
                   <i style={{ background: 'linear-gradient(135deg, #FF6B6B, #4ECDC4, #FFE66D)' }} />
-                  <span>SAM instance proposals</span>
+                  <span>{translate('sam_proposals', lang)}</span>
                 </li>
               </ul>
             </div>

@@ -26,10 +26,10 @@ export function getParcelStyle(f, mode, statuses, selectedId, isHovered, fillEna
     fillColor = LANDUSE_TINT[f.properties.landuse] || '#ddd'
     currentFillOpacity = sel ? Math.min(1, fillOpacity + 0.18) : hov ? Math.min(1, fillOpacity + 0.1) : fillOpacity
   } else if (sel) {
-    fillColor = '#12233F'
-    currentFillOpacity = 0.12
+    fillColor = '#4A2E44'
+    currentFillOpacity = 0.16
   } else if (hov) {
-    fillColor = '#0052CC'
+    fillColor = '#4A2E44'
     currentFillOpacity = 0.08
   }
 
@@ -37,10 +37,10 @@ export function getParcelStyle(f, mode, statuses, selectedId, isHovered, fillEna
   let weight = 1.3
 
   if (sel) {
-    strokeColor = '#12233F'
+    strokeColor = '#4A2E44'
     weight = 3.2
   } else if (hov) {
-    strokeColor = '#0052CC'
+    strokeColor = '#4A2E44'
     weight = 2.4
   }
 
@@ -77,6 +77,7 @@ export default function MapView({
   onGeometryEdit,
   overlaps,
   focus,
+  inspectTarget = null,
   fillEnabled = false,
   fillOpacity = 0.35,
   fitNonce = 0,
@@ -565,6 +566,47 @@ export default function MapView({
     const b = L.latLngBounds(focus.bounds)
     map.current.flyToBounds(b.pad(1.2), { maxZoom: 22, duration: reduceMotion() ? 0 : 0.6 })
   }, [focus])
+
+  // ---------------------------------------------------------------- inspectTarget (auto-zoom + boundary glow)
+  useEffect(() => {
+    if (!inspectTarget?.id || !map.current) return
+    const targetId = inspectTarget.id
+
+    const applyFocusAndGlow = () => {
+      if (!map.current) return
+      map.current.invalidateSize({ debounceMoveend: true })
+      const lyr = parcelLayers.current[targetId]
+      if (lyr && lyr.getBounds) {
+        const bounds = lyr.getBounds()
+        if (bounds && bounds.isValid()) {
+          const isReduced = reduceMotion()
+          map.current.fitBounds(bounds, {
+            padding: [80, 80],
+            maxZoom: 20,
+            animate: !isReduced,
+            duration: isReduced ? 0 : 0.6,
+          })
+        }
+        lyr.bringToFront()
+
+        if (!reduceMotion()) {
+          const pathEl = lyr.getElement?.()
+          if (pathEl) {
+            pathEl.classList.remove('parcel-inspect-glow')
+            void pathEl.offsetWidth // force reflow to restart animation
+            pathEl.classList.add('parcel-inspect-glow')
+            setTimeout(() => {
+              pathEl?.classList.remove('parcel-inspect-glow')
+            }, 1500)
+          }
+        }
+      }
+    }
+
+    applyFocusAndGlow()
+    const t = setTimeout(applyFocusAndGlow, 80)
+    return () => clearTimeout(t)
+  }, [inspectTarget])
 
   // ---------------------------------------------------------------- compare slider via raw cover image
   const updateCoverClip = useCallback(() => {
