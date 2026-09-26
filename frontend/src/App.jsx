@@ -3,7 +3,6 @@ import MapView from './components/MapView.jsx'
 import StepRail from './components/StepRail.jsx'
 import RightPanel, { sortQueueFeatures } from './components/RightPanel.jsx'
 import Legend from './components/Legend.jsx'
-import ReferenceMode from './components/ReferenceMode.jsx'
 import { STEPS, STATUS } from './lib/steps.js'
 import {
   loadIndex,
@@ -176,9 +175,6 @@ export default function App() {
   const [importError, setImportError] = useState(null)
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef(null)
-
-  // Temporary Reference Mode (ground-truth digitisation, gitignored)
-  const [refMode, setRefMode] = useState(false)
 
   // Ground Truth Evaluation State (Task 6)
   const [referenceData, setReferenceData] = useState(null)
@@ -732,17 +728,6 @@ export default function App() {
   if (error) return <div className="boot"><h1>Dhara.ai</h1><p>{error}</p></div>
   if (!scene || !parcels) return <div className="boot"><h1>Dhara.ai</h1><p>Loading scene…</p></div>
 
-  // Reference mode takes over the entire stage
-  if (refMode) {
-    return (
-      <ReferenceMode
-        scene={scene}
-        parcels={parcels}
-        onExit={() => setRefMode(false)}
-      />
-    )
-  }
-
   const m = scene.manifest
   const appClasses = ['app', !leftOpen ? 'no-left' : '', !rightOpen ? 'no-right' : ''].filter(Boolean).join(' ')
 
@@ -1038,19 +1023,6 @@ export default function App() {
               <path d="M12 3v18M8 8l-4 4 4 4M16 8l4 4-4 4" />
             </svg>
             <span>Compare</span>
-          </button>
-
-          <button
-            type="button"
-            className="tool-btn"
-            onClick={() => setRefMode(true)}
-            title="Reference mode: draw ground-truth building polygons"
-            aria-label="Enter reference mode"
-          >
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-            </svg>
-            <span>Reference</span>
           </button>
 
           {styleMode !== 'status' && (

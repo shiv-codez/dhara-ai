@@ -14,6 +14,5 @@ data/processed/*/tiles/
 models/
 labels/
 
-# Temporary reference mode (ground-truth digitisation tool, not part of the product)
-frontend/src/components/ReferenceMode.jsx
+# Reference ground-truth data files (Task 6 sample fixture is in tests/fixtures)
 *_reference_buildings.geojson
