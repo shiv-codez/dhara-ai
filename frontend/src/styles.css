@@ -26,7 +26,7 @@
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 * { box-sizing: border-box; }
-html, body, #root { height: 100%; margin: 0; }
+html, body, #root { height: 100%; margin: 0; max-width: 100vw; overflow-x: hidden; }
 body { font-family: var(--font); font-size: 15px; line-height: 1.45; color: var(--ink); background: var(--chalk); -webkit-font-smoothing: antialiased; }
 h1, h2, h3, p { margin: 0; }
 button, select, textarea { font: inherit; color: inherit; }
@@ -53,11 +53,18 @@ button, select, textarea { font: inherit; color: inherit; }
 .app.no-right {
   grid-template-columns: 300px minmax(0, 1fr);
 }
-.app.no-right .right {
+.app.no-right .side {
   display: none;
 }
 .app.no-left.no-right {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.drawer-close-btn {
+  display: none;
+}
+.mobile-drawer-backdrop {
+  display: none;
 }
 
 .top {
@@ -1140,15 +1147,6 @@ path.parcel-inspect-glow {
   word-break: break-word;
 }
 
-/* ------------------------------------------------------------------ narrow screens */
-@media (max-width: 1080px) {
-  .app { grid-template-columns: 1fr; grid-template-rows: auto 62vh auto auto; height: auto; min-height: 100%; }
-  .top { flex-wrap: wrap; padding: 10px 14px; gap: 10px; }
-  .top-right { margin-left: 0; flex-wrap: wrap; }
-  .stage { grid-row: 2; grid-column: 1; }
-  .rail { grid-row: 3; border-right: 0; border-top: 1px solid var(--line); }
-  .side { grid-row: 4; grid-column: 1; border-left: 0; border-top: 1px solid var(--line); }
-}
 @media (prefers-reduced-motion: reduce) {
   .scan::after { animation-duration: 0.01s; }
   .progress .bar span { transition: none; }
@@ -2007,6 +2005,364 @@ path.parcel-inspect-glow {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* ------------------------------------------------------------------ mobile screens (Mobile Responsiveness Overhaul) */
+@media (max-width: 768px) {
+  /* App Root Layout */
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    height: 100vh;
+    overflow: hidden;
+    position: relative;
+    max-width: 100vw;
+    width: 100vw;
+  }
+
+  /* Main Full-Width Stage */
+  .stage {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    max-width: 100vw;
+    position: relative;
+    overflow: hidden;
+    grid-row: auto;
+    grid-column: auto;
+  }
+
+  /* Responsive Header Toolbar */
+  .top {
+    flex: none;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    height: auto;
+    min-height: 48px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    z-index: 1200;
+    width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+
+  .brand {
+    gap: 6px;
+  }
+  .brand h1 {
+    font-size: 16px;
+  }
+  .brand p {
+    display: none;
+  }
+
+  .scene-pick select {
+    min-width: 95px;
+    max-width: 115px;
+    height: 32px;
+    font-size: 11.5px;
+    padding: 0 4px;
+  }
+
+  .open-results-btn {
+    height: 32px;
+    padding: 0 6px;
+    font-size: 11px;
+    gap: 3px;
+  }
+
+  .view-mode-toggle {
+    display: inline-flex;
+    height: 32px;
+  }
+  .view-mode-btn {
+    padding: 0 7px;
+    font-size: 11.5px;
+  }
+
+  .header-progress {
+    display: none;
+  }
+
+  .top-right {
+    margin-left: auto;
+    gap: 4px;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .chip.draft {
+    display: none;
+  }
+  .chip {
+    font-size: 10.5px;
+    padding: 2px 5px;
+  }
+
+  .panel-toggle-btn {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+  }
+
+  /* Mobile Slide-Out Overlay Drawers */
+  .rail {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(320px, 86vw);
+    max-width: 340px;
+    height: 100dvh;
+    height: 100vh;
+    background: var(--panel);
+    z-index: 1300;
+    border-right: 1px solid var(--line);
+    border-top: 0;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.28);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    transform: translateX(0);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    display: block !important;
+    padding: 14px 14px 30px;
+    box-sizing: border-box;
+  }
+
+  .app.no-left .rail {
+    transform: translateX(-100%);
+    pointer-events: none;
+    box-shadow: none;
+  }
+
+  .rail-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .rail-head .btn.primary.wide {
+    flex: 1;
+  }
+
+  .side {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(360px, 92vw);
+    max-width: 380px;
+    height: 100dvh;
+    height: 100vh;
+    background: var(--panel);
+    z-index: 1300;
+    border-left: 1px solid var(--line);
+    border-top: 0;
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.28);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    transform: translateX(0);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex !important;
+    flex-direction: column;
+    box-sizing: border-box;
+  }
+
+  .app.no-right .side {
+    transform: translateX(100%);
+    pointer-events: none;
+    box-shadow: none;
+  }
+
+  /* Drawer Close Buttons */
+  .drawer-close-btn {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+    background: var(--chalk);
+    color: var(--ink);
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    flex: none;
+  }
+  .drawer-close-btn:active {
+    background: #e4dfd5;
+  }
+
+  /* Mobile Drawer Backdrop Scrim */
+  .mobile-drawer-backdrop {
+    display: block !important;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(2px);
+    z-index: 1250;
+  }
+
+  /* Stage Tag & Map Floating Controls */
+  .stage-tag {
+    top: 8px;
+    left: 8px;
+    padding: 4px 8px;
+    font-size: 11px;
+    max-width: calc(100% - 16px);
+    gap: 6px;
+  }
+  .stage-tag b {
+    font-size: 11.5px;
+  }
+  .stage-tag span {
+    font-size: 11px;
+  }
+
+  .map-toolbar {
+    top: auto;
+    bottom: 12px;
+    right: 8px;
+    padding: 4px 6px;
+    gap: 6px;
+    flex-wrap: wrap;
+    max-width: calc(100% - 16px);
+  }
+  .tool-btn {
+    height: 32px;
+    padding: 0 8px;
+    font-size: 12px;
+  }
+
+  /* Table & Survey Ledger Dashboard (Full Width & Bounded) */
+  .table-dashboard-container {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    max-width: 100vw;
+    padding: 10px 8px 24px;
+    gap: 12px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    box-sizing: border-box;
+  }
+
+  .ledger-overview-row {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 10px 12px;
+    gap: 10px;
+  }
+  .ledger-hero-badge {
+    align-self: flex-start;
+  }
+  .ledger-hero-num {
+    font-size: 22px;
+  }
+  .ledger-chips-section {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    justify-content: flex-start;
+  }
+  .ledger-chip-item {
+    flex: 1 1 calc(50% - 10px);
+    min-width: 110px;
+  }
+
+  .histogram-row {
+    grid-template-columns: 80px 1fr 75px;
+    gap: 8px;
+    font-size: 11px;
+  }
+
+  .table-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .table-search-box {
+    min-width: 100%;
+    max-width: 100%;
+    width: 100%;
+  }
+  .table-filter-group {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .table-filter-label {
+    flex: 1 1 calc(50% - 6px);
+    min-width: 130px;
+  }
+  .table-select {
+    width: 100%;
+  }
+
+  /* Bounded Table Horizontal Container */
+  .table-scroll-wrap {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-sizing: border-box;
+  }
+
+  .parcel-table {
+    min-width: 580px;
+  }
+
+  /* Touch Target Sizing (WCAG 2.5.5 / 2.5.8 Touch Compliance >= 38px) */
+  .table-action-btn {
+    min-height: 38px;
+    min-width: 38px;
+    height: 38px;
+    font-size: 14px;
+    border-radius: 4px;
+  }
+  .inspect-btn {
+    min-height: 38px;
+    height: 38px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+  .quick-approve-btn, .quick-flag-btn, .quick-reject-btn {
+    min-width: 38px;
+    width: 38px;
+    height: 38px;
+    font-size: 16px;
+  }
+
+  /* Leaflet Controls Mobile Sizing */
+  .leaflet-bar a {
+    width: 38px !important;
+    height: 38px !important;
+    line-height: 38px !important;
+    font-size: 16px !important;
+  }
+
+  /* Legend on Mobile */
+  .legend-overlay {
+    bottom: 58px !important;
+    left: 8px !important;
+    max-width: 180px;
+    font-size: 11px;
+    padding: 6px 8px;
   }
 }
 

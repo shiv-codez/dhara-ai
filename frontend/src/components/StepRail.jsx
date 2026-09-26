@@ -15,6 +15,7 @@ export default function StepRail({
   onFixMode,
   manifest,
   lang = 'en',
+  onClose,
 }) {
   const step = STEPS[stepIdx]
   const reg = manifest?.regularisation
@@ -49,6 +50,17 @@ export default function StepRail({
         >
           {playing ? translate('stop_walkthrough', lang) : translate('play_pipeline', lang)}
         </button>
+        {onClose && (
+          <button
+            type="button"
+            className="drawer-close-btn"
+            onClick={onClose}
+            aria-label="Close pipeline drawer"
+            title="Close drawer"
+          >
+            ✕
+          </button>
+        )}
       </div>
 
       <ol className="steps">

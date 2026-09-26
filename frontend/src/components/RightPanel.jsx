@@ -737,7 +737,7 @@ export function ReportTab({
 }
 
 export default function RightPanel(props) {
-  const { tab, onTab, lang = 'en' } = props
+  const { tab, onTab, lang = 'en', onClose } = props
   const tabs = [
     ['parcel', translate('tab_parcel', lang)],
     ['checks', translate('tab_checks', lang)],
@@ -757,6 +757,17 @@ export default function RightPanel(props) {
             {l}
           </button>
         ))}
+        {onClose && (
+          <button
+            type="button"
+            className="drawer-close-btn side-drawer-close"
+            onClick={onClose}
+            aria-label="Close inspector drawer"
+            title="Close drawer"
+          >
+            ✕
+          </button>
+        )}
       </div>
       <div className="side-body">
         {tab === 'parcel' && <ParcelTab {...props} />}

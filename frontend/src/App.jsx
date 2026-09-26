@@ -164,7 +164,7 @@ export default function App() {
 
   // Layout & Styling Controls (Step rail collapsed by default to maximize GIS workspace)
   const [leftOpen, setLeftOpen] = useState(false)
-  const [rightOpen, setRightOpen] = useState(true)
+  const [rightOpen, setRightOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth > 768 : true))
   const [fillEnabled, setFillEnabled] = useState(false)
   const [fillOpacity, setFillOpacity] = useState(0.35)
   const [fitNonce, setFitNonce] = useState(0)
@@ -974,6 +974,7 @@ export default function App() {
         onFixMode={setFixMode}
         manifest={m}
         lang={lang}
+        onClose={() => setLeftOpen(false)}
       />
 
       <main ref={stageRef} className="stage">
@@ -1174,7 +1175,20 @@ export default function App() {
         hasSampleReference={sceneId === 'village_tiled'}
         sceneId={sceneId}
         lang={lang}
+        onClose={() => setRightOpen(false)}
       />
+
+      {/* Mobile Drawer Backdrop Overlay */}
+      {(leftOpen || rightOpen) && (
+        <div
+          className="mobile-drawer-backdrop"
+          onClick={() => {
+            setLeftOpen(false)
+            setRightOpen(false)
+          }}
+          aria-hidden="true"
+        />
+      )}
 
       {/* Bulk Approval Confirmation Modal */}
       {bulkConfirmOpen && (
